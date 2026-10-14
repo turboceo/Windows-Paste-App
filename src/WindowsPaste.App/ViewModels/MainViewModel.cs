@@ -54,7 +54,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ClipboardItem? SelectedItem
     {
         get => _selectedItem;
-        set => SetField(ref _selectedItem, value);
+        set
+        {
+            if (SetField(ref _selectedItem, value))
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanSelectPrevious)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanSelectNext)));
+            }
+        }
     }
 
     public bool IsEmpty
@@ -140,6 +147,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
         var next = Math.Clamp(index + delta, 0, Items.Count - 1);
         SelectedItem = Items[next];
     }
+
+    /// <summary>True when an earlier entry exists to navigate to.</summary>
+    public bool CanSelectPrevious =>
+        Items.Count > 0 && SelectedItem is not null && Items.IndexOf(SelectedItem) > 0;
+
+    /// <summary>True when a later entry exists to navigate to.</summary>
+    public bool CanSelectNext =>
+        Items.Count > 0 && SelectedItem is not null
+        && Items.IndexOf(SelectedItem) < Items.Count - 1;
 
     public ImageSource? GetThumbnail(ClipboardItem item)
     {

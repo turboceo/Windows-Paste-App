@@ -8,11 +8,11 @@ namespace WindowsPaste.Views;
 
 public partial class PopupWindow : Window
 {
-    private const double BottomOffset = 80;
     private const double SlideDistance = 100;
 
-    /// <summary>Panel occupies this fraction of the monitor's working width.</summary>
+    /// <summary>Panel occupies these fractions of the monitor's working area.</summary>
     private const double WidthFraction = 0.9;
+    private const double HeightFraction = 0.6;
 
     private bool _allowDeactivateClose = true;
     private double _restingTop;
@@ -70,6 +70,8 @@ public partial class PopupWindow : Window
     internal System.Windows.Controls.TextBlock SearchPlaceholderForTest => SearchPlaceholder;
     internal System.Windows.Controls.ListBox ItemsListForTest => ItemsList;
     internal double RestingTopForTest => _restingTop;
+    internal System.Windows.Controls.Button PrevButtonForTest => PrevButton;
+    internal System.Windows.Controls.Button NextButtonForTest => NextButton;
 
     public event EventHandler<ClipboardItem>? ItemActivated;
     public event EventHandler<ClipboardItem>? ItemDeleted;
@@ -83,7 +85,7 @@ public partial class PopupWindow : Window
 
         PositionOnActiveScreen();
 
-        // Start off-screen below the resting position, then animate up.
+        // Start slightly below the resting position, then drift up into place.
         _restingTop = Top;
         Opacity = 0;
         Top = _restingTop + SlideDistance;
@@ -98,18 +100,16 @@ public partial class PopupWindow : Window
     }
 
     /// <summary>
-    /// Slides the panel up into place while fading in. Uses a decisive
-    /// ease-out so the motion feels light rather than mechanical.
+    /// Eases the panel into place with a short upward drift and a fade, which
+    /// suits a centred dialog better than the old off-screen slide.
     /// </summary>
     private void BeginSlideIn()
     {
-        var duration = TimeSpan.FromMilliseconds(260);
-
         var slide = new System.Windows.Media.Animation.DoubleAnimation
         {
-            From = Top,
+            From = _restingTop + SlideDistance,
             To = _restingTop,
-            Duration = duration,
+            Duration = TimeSpan.FromMilliseconds(240),
             EasingFunction = new System.Windows.Media.Animation.CubicEase
             {
                 EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut,
@@ -117,11 +117,7 @@ public partial class PopupWindow : Window
             FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop,
         };
 
-        slide.Completed += (_, _) =>
-        {
-            // Stop() reverts to the base value, so pin the resting position.
-            Top = _restingTop;
-        };
+        slide.Completed += (_, _) => Top = _restingTop;
 
         BeginAnimation(TopProperty, slide);
 
@@ -129,7 +125,7 @@ public partial class PopupWindow : Window
         {
             From = 0,
             To = 1,
-            Duration = TimeSpan.FromMilliseconds(160),
+            Duration = TimeSpan.FromMilliseconds(170),
             EasingFunction = new System.Windows.Media.Animation.CubicEase
             {
                 EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut,
@@ -145,7 +141,7 @@ public partial class PopupWindow : Window
     }
 
     /// <summary>
-    /// Slides the panel back down and hides it. Used when dismissing without a
+    /// Drifts the panel down and fades it out. Used when dismissing without a
     /// paste so the exit matches the entry motion.
     /// </summary>
     private void SlideOutAndHide()
@@ -154,7 +150,7 @@ public partial class PopupWindow : Window
         {
             From = Top,
             To = _restingTop + SlideDistance,
-            Duration = TimeSpan.FromMilliseconds(170),
+            Duration = TimeSpan.FromMilliseconds(160),
             EasingFunction = new System.Windows.Media.Animation.CubicEase
             {
                 EasingMode = System.Windows.Media.Animation.EasingMode.EaseIn,
@@ -198,16 +194,16 @@ public partial class PopupWindow : Window
         var area = screen.WorkingArea;
 
         var dpi = VisualTreeHelper.GetDpi(this);
-        var height = Height * dpi.DpiScaleY;
 
-        // Occupy 90% of the monitor's working width, centred on that monitor.
+        // 90% wide and 60% tall, centred on the monitor under the cursor.
         var widthPx = area.Width * WidthFraction;
-        Left = (area.Left + (area.Width - widthPx) / 2.0) / dpi.DpiScaleX;
-        Width = widthPx / dpi.DpiScaleX;
+        var heightPx = area.Height * HeightFraction;
 
-        // Sit BottomOffset above the working-area bottom edge.
-        var bottomOffsetPx = BottomOffset * dpi.DpiScaleY;
-        Top = (area.Bottom - height - bottomOffsetPx) / dpi.DpiScaleY;
+        Width = widthPx / dpi.DpiScaleX;
+        Height = heightPx / dpi.DpiScaleY;
+
+        Left = (area.Left + (area.Width - widthPx) / 2.0) / dpi.DpiScaleX;
+        Top = (area.Top + (area.Height - heightPx) / 2.0) / dpi.DpiScaleY;
     }
 
     private void OnDeactivated(object? sender, EventArgs e)
@@ -269,6 +265,18 @@ public partial class PopupWindow : Window
     private void OnItemActivated(object sender, MouseButtonEventArgs e)
     {
         ActivateSelected();
+    }
+
+    private void OnPreviousClick(object sender, RoutedEventArgs e)
+    {
+        ViewModel.MoveSelection(-1);
+        ScrollSelectionIntoView();
+    }
+
+    private void OnNextClick(object sender, RoutedEventArgs e)
+    {
+        ViewModel.MoveSelection(1);
+        ScrollSelectionIntoView();
     }
 
     private void ActivateSelected()

@@ -214,11 +214,11 @@ internal static class SelfTest
             var heightPx = (int)Math.Round(popup.ActualHeight * dpi.DpiScaleY);
 
             lines.Add($"screen working area : {area.Left},{area.Top} {area.Width}x{area.Height}");
-            lines.Add($"shelf window        : {leftPx},{topPx} {widthPx}x{heightPx}");
+            lines.Add($"panel window        : {leftPx},{topPx} {widthPx}x{heightPx}");
             lines.Add($"occupies 90% width  : {Math.Abs(widthPx - area.Width * 0.9) <= 4} ({widthPx / (double)area.Width:P0})");
-            lines.Add($"horizontally centred: {Math.Abs((leftPx + widthPx / 2.0) - (area.Left + area.Width / 2.0)) <= 4}");
-            lines.Add($"gap above bottom    = {area.Bottom - (topPx + heightPx)}px (expect 80)");
-            lines.Add($"raises 80px up      : {Math.Abs((area.Bottom - (topPx + heightPx)) - 80) <= 4}");
+            lines.Add($"occupies 60% height : {Math.Abs(heightPx - area.Height * 0.6) <= 4} ({heightPx / (double)area.Height:P0})");
+            lines.Add($"centred horizontally: {Math.Abs((leftPx + widthPx / 2.0) - (area.Left + area.Width / 2.0)) <= 4}");
+            lines.Add($"centred vertically  : {Math.Abs((topPx + heightPx / 2.0) - (area.Top + area.Height / 2.0)) <= 4}");
             lines.Add($"opacity settles at 1= {Math.Abs(popup.Opacity - 1) <= 0.01}");
             lines.Add($"reported items      : {viewModel.Items.Count}");
             lines.Add($"selected is first   : {viewModel.SelectedItem?.Id == viewModel.Items.FirstOrDefault()?.Id}");
@@ -312,6 +312,41 @@ internal static class SelfTest
             popup.SearchBoxForTest.GetBindingExpression(System.Windows.Controls.TextBox.TextProperty)?.UpdateSource();
             await Task.Delay(120);
             lines.Add($"-- UI TextBox cleared -> count={viewModel.Items.Count} (expect 2)");
+
+            // Toolbar must read as: search on the left, nav buttons on the right.
+            var searchBox = popup.SearchBoxForTest;
+            var prev = popup.PrevButtonForTest;
+            var next = popup.NextButtonForTest;
+
+            if (searchBox.IsDescendantOf(popup) && prev != null && next != null)
+            {
+                var searchTopLeft = searchBox.TranslatePoint(new System.Windows.Point(0, 0), popup);
+                var prevTopLeft = prev.TranslatePoint(new System.Windows.Point(0, 0), popup);
+                var nextTopLeft = next.TranslatePoint(new System.Windows.Point(0, 0), popup);
+
+                lines.Add($"-- toolbar search x  = {searchTopLeft.X:F0} (left side)");
+                lines.Add($"-- toolbar prev   x  = {prevTopLeft.X:F0}");
+                lines.Add($"-- toolbar next   x  = {nextTopLeft.X:F0}");
+                lines.Add($"-- search left of nav= {searchTopLeft.X < prevTopLeft.X}");
+                lines.Add($"-- next right of prev= {nextTopLeft.X > prevTopLeft.X}");
+                lines.Add($"-- nav below search? = {prevTopLeft.Y >= searchTopLeft.Y - 1} (toolbar is a row)");
+                lines.Add($"-- prev enabled      = {prev.IsEnabled}");
+                lines.Add($"-- next enabled      = {next.IsEnabled}");
+                lines.Add($"-- nav on same row   = {Math.Abs(nextTopLeft.Y - prevTopLeft.Y) <= 1}");
+
+                // Clicking next must move the selection to the older entry.
+                var beforeId = viewModel.SelectedItem?.Id;
+                next.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                await Task.Delay(80);
+                var afterId = viewModel.SelectedItem?.Id;
+                lines.Add($"-- next click moved  : {beforeId} -> {afterId} (changed={beforeId != afterId})");
+                lines.Add($"-- prev now enabled  : {prev.IsEnabled}");
+
+                // And back again.
+                prev.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                await Task.Delay(80);
+                lines.Add($"-- prev click moved  : {afterId} -> {viewModel.SelectedItem?.Id}");
+            }
 
             popup.Hide();
         }
