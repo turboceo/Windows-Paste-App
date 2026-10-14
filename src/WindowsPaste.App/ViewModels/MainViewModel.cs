@@ -157,6 +157,24 @@ public sealed class MainViewModel : INotifyPropertyChanged
         Items.Count > 0 && SelectedItem is not null
         && Items.IndexOf(SelectedItem) < Items.Count - 1;
 
+    /// <summary>
+    /// Number of cards per row in the wrapping grid. The view sets this whenever
+    /// the list is laid out so arrow-key navigation can match the visual rows.
+    /// </summary>
+    public int ColumnsPerRow { get; set; } = 1;
+
+    /// <summary>Moves the selection by whole rows, used by Up/Down in the grid.</summary>
+    public void MoveSelectionByRow(int rowDelta)
+    {
+        if (Items.Count == 0)
+        {
+            return;
+        }
+
+        var columns = Math.Max(1, ColumnsPerRow);
+        MoveSelection(rowDelta * columns);
+    }
+
     public ImageSource? GetThumbnail(ClipboardItem item)
     {
         if (item.Type != ClipboardItemType.Image)

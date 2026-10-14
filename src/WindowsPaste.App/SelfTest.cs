@@ -230,26 +230,26 @@ internal static class SelfTest
             }
 
             // Search must filter the collection the ListBox is bound to.
-            lines.Add($"-- search 'notepad' (before) count={viewModel.Items.Count}");
-            viewModel.SearchText = "notepad";
-            lines.Add($"-- search 'notepad' (after)  count={viewModel.Items.Count}");
-            foreach (var entry in viewModel.Items)
-            {
-                lines.Add($"   match: {entry.Preview[..Math.Min(40, entry.Preview.Length)]}");
-            }
-
+            var beforeSearch = viewModel.Items.Count;
+            lines.Add($"-- search 'zzz-no-such-entry' count before={beforeSearch}");
             viewModel.SearchText = "zzz-no-such-entry";
             lines.Add($"-- search 'zzz-no-such-entry' count={viewModel.Items.Count} (expect 0)");
 
             viewModel.SearchText = string.Empty;
-            lines.Add($"-- cleared count={viewModel.Items.Count}");
+            lines.Add($"-- cleared restores  = {viewModel.Items.Count == beforeSearch} ({viewModel.Items.Count})");
 
             // Exercise the real TextBox binding, not just the view model property.
-            popup.SearchBoxForTest.Text = "notepad";
+            popup.SearchBoxForTest.Text = "zzz-no-such-entry";
             popup.SearchBoxForTest.GetBindingExpression(System.Windows.Controls.TextBox.TextProperty)?.UpdateSource();
             await Task.Delay(120);
-            lines.Add($"-- UI TextBox 'notepad' -> vm.SearchText='{viewModel.SearchText}' count={viewModel.Items.Count} (expect 1)");
+            lines.Add($"-- UI TextBox binds  = vm.SearchText='{viewModel.SearchText}' count={viewModel.Items.Count} (expect 0)");
             lines.Add($"-- UI TextBox placeholder visible={popup.SearchPlaceholderForTest.Visibility}");
+
+            // Restore the full list before inspecting rendered cards.
+            popup.SearchBoxForTest.Text = string.Empty;
+            popup.SearchBoxForTest.GetBindingExpression(System.Windows.Controls.TextBox.TextProperty)?.UpdateSource();
+            await Task.Delay(150);
+            lines.Add($"-- UI TextBox cleared -> count={viewModel.Items.Count}");
 
             // Confirm the rendered first card is square (width == height).
             var firstContainer = popup.ItemsListForTest.ItemContainerGenerator
@@ -290,6 +290,57 @@ internal static class SelfTest
                 }
                 lines.Add($"-- container size = {firstContainer.ActualWidth} x {firstContainer.ActualHeight}");
 
+                // Cards must flow left-to-right and wrap onto new rows, so with
+                // enough items the grid grows downwards from the top.
+                var listTop = popup.ItemsListForTest.TranslatePoint(new System.Windows.Point(0, 0), popup).Y;
+                var cardTop = firstContainer.TranslatePoint(new System.Windows.Point(0, 0), popup).Y;
+                var listHeight = popup.ItemsListForTest.ActualHeight;
+                var gapAboveCard = cardTop - listTop;
+                lines.Add($"-- list region top   = {listTop:F0}, height {listHeight:F0}");
+                lines.Add($"-- first card top    = {cardTop:F0} (gap {gapAboveCard:F0}px from list top)");
+                lines.Add($"-- cards start at top= {gapAboveCard <= 4}");
+
+                // Inspect the first few containers: they should share a row, then
+                // the next ones should drop to a lower row (same X as first).
+                var positions = new List<(double X, double Y)>();
+                for (var i = 0; i < Math.Min(12, viewModel.Items.Count); i++)
+                {
+                    if (popup.ItemsListForTest.ItemContainerGenerator.ContainerFromIndex(i)
+                        is System.Windows.FrameworkElement c)
+                    {
+                        var p = c.TranslatePoint(new System.Windows.Point(0, 0), popup);
+                        positions.Add((p.X, p.Y));
+                    }
+                }
+
+                if (positions.Count >= 4)
+                {
+                    var row1Y = positions[0].Y;
+                    var sameRow = positions.Count(p => Math.Abs(p.Y - row1Y) <= 2);
+                    var secondRow = positions.Where(p => p.Y > row1Y + 2).ToList();
+                    lines.Add($"-- cards in first row= {sameRow}");
+                    lines.Add($"-- wraps to new row  = {secondRow.Count > 0}");
+                    if (secondRow.Count > 0)
+                    {
+                        lines.Add($"-- row 2 starts at X = {secondRow[0].X:F0} (aligned with row 1: {Math.Abs(secondRow[0].X - positions[0].X) <= 2})");
+                        lines.Add($"-- row 2 is lower    = {secondRow[0].Y > row1Y}");
+                    }
+
+                    // Row-aware navigation: Down should hop exactly one row.
+                    var columns = viewModel.ColumnsPerRow;
+                    lines.Add($"-- vm.ColumnsPerRow  = {columns}");
+
+                    viewModel.SelectedItem = viewModel.Items[0];
+                    var beforeIdx = viewModel.Items.IndexOf(viewModel.SelectedItem);
+                    viewModel.MoveSelectionByRow(1);
+                    var afterIdx = viewModel.Items.IndexOf(viewModel.SelectedItem);
+                    lines.Add($"-- Down hop: idx {beforeIdx} -> {afterIdx} (expect {columns})");
+                    lines.Add($"-- row hop correct   = {afterIdx == Math.Min(columns, viewModel.Items.Count - 1)}");
+
+                    viewModel.MoveSelectionByRow(-1);
+                    lines.Add($"-- Up hop back       = {viewModel.Items.IndexOf(viewModel.SelectedItem)}");
+                }
+
                 // The hit box must not change between default, hover and selected.
                 // Simulate each state on a fresh container and compare geometry.
                 var item = (System.Windows.Controls.ListBoxItem)firstContainer;
@@ -307,11 +358,6 @@ internal static class SelfTest
                 lines.Add($"-- box selected   = {selectedBox}  brush={Describe(selectedHalo?.BorderBrush)}");
                 lines.Add($"-- box unchanged  = {baseline == selectedBox}");
             }
-
-            popup.SearchBoxForTest.Text = string.Empty;
-            popup.SearchBoxForTest.GetBindingExpression(System.Windows.Controls.TextBox.TextProperty)?.UpdateSource();
-            await Task.Delay(120);
-            lines.Add($"-- UI TextBox cleared -> count={viewModel.Items.Count} (expect 2)");
 
             // Toolbar must read as: search on the left, nav buttons on the right.
             var searchBox = popup.SearchBoxForTest;

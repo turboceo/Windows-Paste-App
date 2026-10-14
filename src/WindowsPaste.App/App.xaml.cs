@@ -51,6 +51,15 @@ public partial class App : Application
 
         try
         {
+#if DEBUG
+            // Seed before services open the database so the UI shows the rows.
+            var seedCount = ParseSeedCount(e.Args);
+            if (seedCount > 0)
+            {
+                DevSeed.Run(new AppPaths(), seedCount);
+            }
+#endif
+
             InitializeServices();
         }
         catch (Exception ex)
@@ -70,6 +79,32 @@ public partial class App : Application
 #endif
         }
     }
+
+#if DEBUG
+    /// <summary>
+    /// Reads "--seed [n]" from the command line. Defaults to 50 entries so
+    /// "--seed" alone is enough for a quick layout check.
+    /// </summary>
+    private static int ParseSeedCount(string[] args)
+    {
+        for (var i = 0; i < args.Length; i++)
+        {
+            if (!string.Equals(args[i], "--seed", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (i + 1 < args.Length && int.TryParse(args[i + 1], out var explicitCount))
+            {
+                return Math.Clamp(explicitCount, 1, 1000);
+            }
+
+            return 50;
+        }
+
+        return 0;
+    }
+#endif
 
     private void InitializeServices()
     {

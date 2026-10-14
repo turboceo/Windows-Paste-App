@@ -29,16 +29,64 @@ public partial class PopupWindow : Window
                 : Visibility.Collapsed;
         };
 
-        // After filtering, rewind the strip so matches are visible from the left.
+        // After filtering, rewind the grid so the first matches are on screen.
         viewModel.SearchChanged += (_, _) =>
         {
             ItemsList.UpdateLayout();
             var scrollViewer = FindScrollViewer(ItemsList);
-            if (scrollViewer is not null)
-            {
-                scrollViewer.ScrollToLeftEnd();
-            }
+            scrollViewer?.ScrollToHome();
+            UpdateColumnsPerRow();
         };
+
+        // The card width is fixed, so remeasure the column count on resize.
+        SizeChanged += (_, _) => UpdateColumnsPerRow();
+    }
+
+    /// <summary>
+    /// Counts how many cards fit across the grid so Up/Down can move by whole
+    /// rows. Measured from the rendered containers rather than assumed.
+    /// </summary>
+    private void UpdateColumnsPerRow()
+    {
+        if (ViewModel is null || ItemsList.ActualWidth <= 0)
+        {
+            return;
+        }
+
+        var count = Math.Min(ViewModel.Items.Count, 64);
+        if (count == 0)
+        {
+            ViewModel.ColumnsPerRow = 1;
+            return;
+        }
+
+        ItemsList.UpdateLayout();
+
+        var first = ItemsList.ItemContainerGenerator.ContainerFromIndex(0) as System.Windows.FrameworkElement;
+        if (first is null || first.ActualWidth <= 0)
+        {
+            return;
+        }
+
+        // Count containers sharing the first card's row.
+        var rowTop = first.TranslatePoint(new System.Windows.Point(0, 0), ItemsList).Y;
+        var columns = 0;
+        for (var i = 0; i < count; i++)
+        {
+            if (ItemsList.ItemContainerGenerator.ContainerFromIndex(i)
+                is System.Windows.FrameworkElement container)
+            {
+                var top = container.TranslatePoint(new System.Windows.Point(0, 0), ItemsList).Y;
+                if (Math.Abs(top - rowTop) > 2)
+                {
+                    break;
+                }
+
+                columns++;
+            }
+        }
+
+        ViewModel.ColumnsPerRow = Math.Max(1, columns);
     }
 
     private static System.Windows.Controls.ScrollViewer? FindScrollViewer(
@@ -95,6 +143,9 @@ public partial class PopupWindow : Window
         Activate();
         SearchBox.Focus();
         Keyboard.Focus(SearchBox);
+
+        // Grid is laid out now, so the row size is measurable for arrow keys.
+        UpdateColumnsPerRow();
 
         BeginSlideIn();
     }
@@ -223,17 +274,28 @@ public partial class PopupWindow : Window
                 SlideOutAndHide();
                 break;
 
-            case Key.Down:
             case Key.Right:
                 e.Handled = true;
                 ViewModel.MoveSelection(1);
                 ScrollSelectionIntoView();
                 break;
 
-            case Key.Up:
             case Key.Left:
                 e.Handled = true;
                 ViewModel.MoveSelection(-1);
+                ScrollSelectionIntoView();
+                break;
+
+            // Up/Down hop whole rows, matching the wrapping grid.
+            case Key.Down:
+                e.Handled = true;
+                ViewModel.MoveSelectionByRow(1);
+                ScrollSelectionIntoView();
+                break;
+
+            case Key.Up:
+                e.Handled = true;
+                ViewModel.MoveSelectionByRow(-1);
                 ScrollSelectionIntoView();
                 break;
 
@@ -256,9 +318,21 @@ public partial class PopupWindow : Window
 
     private void ScrollSelectionIntoView()
     {
-        if (ViewModel.SelectedItem is not null)
+        var item = ViewModel.SelectedItem;
+        if (item is null)
         {
-            ItemsList.ScrollIntoView(ViewModel.SelectedItem);
+            return;
+        }
+
+        ItemsList.ScrollIntoView(item);
+
+        // Nudge the container fully into view; WrapPanel rows can leave the
+        // selected card half-clipped at the region edge.
+        ItemsList.UpdateLayout();
+        if (ItemsList.ItemContainerGenerator.ContainerFromItem(item)
+            is System.Windows.FrameworkElement container)
+        {
+            container.BringIntoView();
         }
     }
 

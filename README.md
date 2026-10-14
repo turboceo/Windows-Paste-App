@@ -11,11 +11,11 @@ and paste any entry straight back into the app you were using.
 - The panel is centred on the monitor under the cursor, spanning 90% of its width and 60% of its height
 - Vertical layout: the card strip fills the top, with a toolbar along the bottom
 - Toolbar holds the search box on the left and previous/next navigation on the right
-- History appears as a horizontally scrolling strip of square cards, newest on the left
+- History appears as a wrapping grid of square cards: left-to-right, then onto the next row, filling top-to-bottom
 - Cards are tinted by type (text / image / files) with image thumbnails inline
 - Captures text, images, and copied files
 - Search filters the strip live and rewinds it to the first match
-- Keyboard-driven: `Left`/`Right` (or `Up`/`Down`) to move, `Enter` to paste, `Ctrl+P` to pin, `Del` to remove, `Esc` to close
+- Keyboard-driven: `Left`/`Right` within a row, `Up`/`Down` by whole row, `Enter` to paste, `Ctrl+P` to pin, `Del` to remove, `Esc` to close
 - On-screen previous/next buttons in the toolbar for mouse-driven navigation
 - Double-click a card to paste; the shelf opens with the newest entry selected
 - Pasting writes the entry back to the clipboard and sends `Ctrl+V` to the previously focused window
@@ -62,6 +62,7 @@ src/WindowsPaste.App/
     TrayIcon.cs                 NotifyIcon with context menu
   Converters/                   Type glyph, thumbnail, card colour, visibility
   SelfTest.cs                   Debug-only layout harness (--selftest)
+  DevSeed.cs                    Debug-only sample data seeder (--seed)
 ```
 
 ## Build and run
@@ -72,6 +73,23 @@ dotnet run --project src/WindowsPaste.App
 ```
 
 The app starts hidden with a tray icon. Press `Ctrl + Shift + V` to open the overlay.
+
+## Development helpers (Debug builds only)
+
+```powershell
+# Fill the history with 50 sample entries (wipes existing history)
+dotnet run --project src/WindowsPaste.App -- --seed
+
+# Seed a specific number of entries
+dotnet run --project src/WindowsPaste.App -- --seed 120
+
+# Report panel geometry, card sizing, contrast ratios and search behaviour, then exit
+dotnet run --project src/WindowsPaste.App -- --selftest
+```
+
+`--seed` writes a manifest to `%LOCALAPPDATA%\WindowsPaste\seed.txt`; `--selftest`
+writes its findings to `selftest.txt` in the same folder. Both flags compile out
+of Release builds.
 
 ## Release build (single file)
 
@@ -87,6 +105,9 @@ Output lands in `src/WindowsPaste.App/bin/Release/net10.0-windows/win-x64/publis
 - [ ] Copy text in Notepad, press the hotkey, confirm the panel appears centred and fades in
 - [ ] Confirm the panel spans 90% of the screen width and 60% of its height, centred
 - [ ] Confirm the layout is vertical: cards on top, toolbar along the bottom
+- [ ] Confirm cards stack from the top of the list area, not vertically centred
+- [ ] Confirm cards fill left-to-right, then wrap onto the next row
+- [ ] Confirm `Down`/`Up` move by a whole row and `Left`/`Right` move within a row
 - [ ] Confirm the toolbar has the search box on the left and prev/next arrows on the right
 - [ ] Click the arrows and confirm the selection moves between cards (disabled at each end)
 - [ ] Confirm the panel is a white frosted surface with a light colour scheme and dark, readable icons
