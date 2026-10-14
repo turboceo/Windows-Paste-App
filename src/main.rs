@@ -30,7 +30,7 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     FindWindowW, GetCursorPos, GetWindowRect, IsWindowVisible, IsZoomed, SendMessageW, SetWindowPos,
-    ShowWindow, HTCAPTION, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_MAXIMIZE, SW_MINIMIZE,
+    ShowWindow, HTCAPTION, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_MINIMIZE,
     SW_RESTORE, SW_SHOW, WM_NCLBUTTONDOWN,
 };
 
@@ -44,7 +44,8 @@ use crate::tray::TrayIcon;
 slint::include_modules!();
 
 const WINDOW_TITLE: &str = "Windows Paste";
-const DEFAULT_COLUMNS: usize = 5;
+const DEFAULT_COLUMNS: usize = 4;
+const FIXED_COLUMNS: usize = 4;
 
 /// 应用程序全局运行状态上下文
 struct AppState {
@@ -128,6 +129,11 @@ fn position_center_on_cursor(hwnd: HWND) {
         return;
     }
     unsafe {
+        // 如果处于最大化状态，先还原为优雅的悬浮窗口，杜绝全屏最大化
+        if IsZoomed(hwnd) != 0 {
+            ShowWindow(hwnd, SW_RESTORE);
+        }
+
         let mut pt: POINT = std::mem::zeroed();
         GetCursorPos(&mut pt);
 
@@ -140,9 +146,9 @@ fn position_center_on_cursor(hwnd: HWND) {
             let work_w = work.right - work.left;
             let work_h = work.bottom - work.top;
 
-            // 宽度占用工作区的 78%（限制在 1000px ~ 1520px 之间），高度占用 60%
-            let target_w = (work_w as f32 * 0.78).clamp(1000.0, 1520.0) as i32;
-            let target_h = (work_h as f32 * 0.60) as i32;
+            // 固定 4 列卡片的精致悬浮面板尺寸（标准宽度约 1080px，高度约占工作区 58%）
+            let target_w = (1080.0f32).min(work_w as f32 * 0.90) as i32;
+            let target_h = (work_h as f32 * 0.58).clamp(520.0, 680.0) as i32;
 
             let x = work.left + (work_w - target_w) / 2;
             let y = work.top + (work_h - target_h) / 2;
@@ -279,17 +285,15 @@ fn get_window_width() -> f32 {
 }
 
 /// 视口动态自适应算法：根据当前可用宽度智能推导最佳列数与等比卡片像素大小
+/// 视口布局算法：严格保持每行 4 个卡片展示，根据当前宽度均匀铺满
 fn compute_autofit_layout(window_width: f32) -> (usize, f32) {
     let padding_horizontal = 40.0; // 左右 padding 各 20px
     let scrollbar_reserve = 14.0;
     let usable_width = (window_width - padding_horizontal - scrollbar_reserve).max(300.0);
-
-    let target_card_base = 240.0;
     let gap = 16.0;
 
-    let columns = ((usable_width + gap) / (target_card_base + gap))
-        .floor()
-        .max(1.0) as usize;
+    // 严格固定每行 4 列
+    let columns = FIXED_COLUMNS;
     let card_size_px = (usable_width - (columns as f32 - 1.0) * gap) / columns as f32;
 
     (columns, card_size_px)
@@ -614,29 +618,7 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    // (6) 标题栏双击或按钮最大化/还原切换
-    {
-        let state_ui = state.clone();
-        let win_weak = win_handle.clone();
-        window.on_toggle_maximize(move || {
-            let hwnd = get_app_hwnd();
-            if !hwnd.is_null() {
-                unsafe {
-                    if IsZoomed(hwnd) != 0 {
-                        ShowWindow(hwnd, SW_RESTORE);
-                    } else {
-                        ShowWindow(hwnd, SW_MAXIMIZE);
-                    }
-                }
-                if let Some(w) = win_weak.upgrade() {
-                    let is_max = unsafe { IsZoomed(hwnd) != 0 };
-                    w.set_is_maximized(is_max);
-                    let mut st = state_ui.lock().unwrap();
-                    sync_ui(&w, &mut st);
-                }
-            }
-        });
-    }
+
 
     // (7) 最小化窗口
     window.on_minimize(|| {

@@ -220,10 +220,8 @@ component PasteCard inherits Rectangle {
 component TitleBar inherits Rectangle {
     in property <int> total_count: 0;
     in property <int> filtered_count: 0;
-    in property <bool> is_maximized: false;
 
     callback drag_move();
-    callback toggle_maximize();
     callback minimize();
     callback close();
 
@@ -288,7 +286,7 @@ component TitleBar inherits Rectangle {
             }
         }
 
-        // Middle Draggable Spacer (Drag window & double click to toggle maximize)
+        // Middle Draggable Spacer (Drag window)
         Rectangle {
             horizontal-stretch: 1;
 
@@ -298,7 +296,6 @@ component TitleBar inherits Rectangle {
                         root.drag_move();
                     }
                 }
-                double-clicked => { root.toggle_maximize(); }
             }
         }
 
@@ -322,54 +319,6 @@ component TitleBar inherits Rectangle {
 
                 min_touch := TouchArea {
                     clicked => { root.minimize(); }
-                }
-            }
-
-            // Maximize / Restore Button: Crisp square outline or dual boxes
-            Rectangle {
-                width: 44px;
-                height: 100%;
-                background: max_touch.has-hover ? #00000014 : transparent;
-
-                if !root.is_maximized: Rectangle {
-                    width: 10px;
-                    height: 10px;
-                    border-width: 1.2px;
-                    border-color: #475569;
-                    background: transparent;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                }
-
-                if root.is_maximized: Rectangle {
-                    width: 11px;
-                    height: 11px;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-
-                    // Back box
-                    Rectangle {
-                        x: 2.5px;
-                        y: 0px;
-                        width: 8px;
-                        height: 8px;
-                        border-width: 1.2px;
-                        border-color: #475569;
-                    }
-                    // Front box
-                    Rectangle {
-                        x: 0px;
-                        y: 2.5px;
-                        width: 8px;
-                        height: 8px;
-                        border-width: 1.2px;
-                        border-color: #475569;
-                        background: #f6f8fb;
-                    }
-                }
-
-                max_touch := TouchArea {
-                    clicked => { root.toggle_maximize(); }
                 }
             }
 
@@ -551,14 +500,13 @@ component ToolBar inherits Rectangle {
 export component MainWindow inherits Window {
     title: "Windows Paste";
     no-frame: true;
-    width: 1400px;
-    height: 620px;
+    width: 1080px;
+    height: 600px;
     background: #f6f8fb;
 
     in property <[SlintClipRow]> rows: [];
     in property <int> total_count: 0;
     in property <int> filtered_count: 0;
-    in property <bool> is_maximized: false;
     in-out property <string> search_text: "";
     in property <bool> can_prev: false;
     in property <bool> can_next: false;
@@ -572,7 +520,6 @@ export component MainWindow inherits Window {
     callback remove_item(int);
 
     callback drag_move();
-    callback toggle_maximize();
     callback minimize();
     callback close_window();
 
@@ -638,9 +585,7 @@ export component MainWindow inherits Window {
             TitleBar {
                 total_count: root.total_count;
                 filtered_count: root.filtered_count;
-                is_maximized: root.is_maximized;
                 drag_move => { root.drag_move(); }
-                toggle_maximize => { root.toggle_maximize(); }
                 minimize => { root.minimize(); }
                 close => { root.close_window(); }
             }
