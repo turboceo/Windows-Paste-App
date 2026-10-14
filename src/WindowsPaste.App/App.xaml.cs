@@ -1,0 +1,250 @@
+using System.Threading;
+using System.Windows;
+using System.Windows.Forms;
+using WindowsPaste.Interop;
+using WindowsPaste.Models;
+using WindowsPaste.Services;
+using WindowsPaste.ViewModels;
+using WindowsPaste.Views;
+using Application = System.Windows.Application;
+using MessageBox = System.Windows.MessageBox;
+
+namespace WindowsPaste;
+
+public partial class App : Application
+{
+    private const string SingleInstanceMutexName = @"Local\WindowsPaste.SingleInstance";
+
+    private Mutex? _mutex;
+    private MessageWindow? _messageWindow;
+    private ClipboardMonitor? _monitor;
+    private HotkeyManager? _hotkeyManager;
+    private ClipboardSniffer? _sniffer;
+    private ClipboardRepository? _repository;
+    private PasteService? _pasteService;
+    private MainViewModel? _viewModel;
+    private PopupWindow? _popup;
+    private TrayIcon? _tray;
+    private AppSettings _settings = new();
+    private IntPtr _lastForegroundWindow;
+    private DateTime _lastHotkeyTime = DateTime.MinValue;
+
+    protected override void OnStartup(StartupEventArgs e)
+    {
+        base.OnStartup(e);
+
+        _mutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var createdNew);
+        if (!createdNew)
+        {
+            MessageBox.Show("Windows Paste is already running. Look for it in the system tray.",
+                "Windows Paste", MessageBoxButton.OK, MessageBoxImage.Information);
+            Shutdown();
+            return;
+        }
+
+        DispatcherUnhandledException += (_, args) =>
+        {
+            MessageBox.Show(args.Exception.Message, "Windows Paste error",
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+            args.Handled = true;
+        };
+
+        try
+        {
+            InitializeServices();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to start Windows Paste:\n{ex.Message}",
+                "Windows Paste", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown();
+            return;
+        }
+
+        if (e.Args.Any(arg => string.Equals(arg, "--selftest", StringComparison.OrdinalIgnoreCase))
+            && _viewModel is not null)
+        {
+#if DEBUG
+            var paths = new AppPaths();
+            _ = SelfTest.RunAsync(_viewModel, paths);
+#endif
+        }
+    }
+
+    private void InitializeServices()
+    {
+        _settings = AppSettings.Load();
+        _settings.ApplyRunAtLogin(AppSettings.ExecutablePath());
+
+        var paths = new AppPaths();
+        _sniffer = new ClipboardSniffer(paths.Blobs);
+        _repository = new ClipboardRepository(paths.Database, _settings.HistoryCapacity);
+
+        // Lets the image card converter resolve blob file names to absolute paths.
+        Converters.TypeToThumbnailConverter.BlobDirectory = paths.Blobs;
+
+        _messageWindow = new MessageWindow();
+        _messageWindow.EnsureCreated();
+
+        _monitor = new ClipboardMonitor(_messageWindow);
+        _monitor.ClipboardChanged += OnClipboardChanged;
+        _monitor.Start();
+
+        _pasteService = new PasteService(_sniffer, _monitor);
+
+        _viewModel = new MainViewModel(_repository, _sniffer, _settings);
+        _viewModel.AttachBlobsRoot(paths.Blobs);
+
+        _tray = new TrayIcon();
+        _tray.OpenRequested += (_, _) => Dispatcher.Invoke(ShowPopup);
+        _tray.ClearRequested += (_, _) => Dispatcher.Invoke(ClearHistory);
+        _tray.SettingsRequested += (_, _) => Dispatcher.Invoke(ShowSettings);
+        _tray.ExitRequested += (_, _) => Dispatcher.Invoke(Shutdown);
+        _tray.PauseToggled += (_, paused) =>
+        {
+            if (_monitor is not null)
+            {
+                _monitor.Paused = paused;
+            }
+        };
+
+        _hotkeyManager = new HotkeyManager(_messageWindow);
+        _hotkeyManager.Pressed += OnHotkeyPressed;
+        var definition = _settings.ToHotkeyDefinition();
+        if (!_hotkeyManager.Register(definition))
+        {
+            _tray.ShowBalloon("Hotkey unavailable",
+                $"Could not register {definition.Display}; another app may be using it.");
+        }
+
+        _lastForegroundWindow = NativeMethods.GetForegroundWindow();
+    }
+
+    private void OnHotkeyPressed(object? sender, EventArgs e)
+    {
+        // Debounce accidental double-taps of the hotkey.
+        var now = DateTime.UtcNow;
+        if ((now - _lastHotkeyTime).TotalMilliseconds < 200)
+        {
+            return;
+        }
+
+        _lastHotkeyTime = now;
+
+        Dispatcher.Invoke(() =>
+        {
+            if (_popup is { IsVisible: true })
+            {
+                _popup.Hide();
+                return;
+            }
+
+            ShowPopup();
+        });
+    }
+
+    private void OnClipboardChanged(object? sender, EventArgs e)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            try
+            {
+                var item = _sniffer?.Capture();
+                if (item is not null && _viewModel is not null)
+                {
+                    _viewModel.Add(item);
+                }
+            }
+            catch (Exception)
+            {
+                // A transient clipboard failure should never crash the app.
+            }
+        });
+    }
+
+    private void ShowPopup()
+    {
+        if (_viewModel is null || _pasteService is null)
+        {
+            return;
+        }
+
+        // Remember who had focus so the paste lands in the right window.
+        _lastForegroundWindow = NativeMethods.GetForegroundWindow();
+
+        if (_popup is null)
+        {
+            _popup = new PopupWindow(_viewModel);
+            _popup.ItemActivated += OnItemActivated;
+            _popup.ItemDeleted += (_, item) => _viewModel?.Delete(item);
+            _popup.ItemPinToggled += (_, item) => _viewModel?.TogglePin(item);
+            _popup.Closed += (_, _) => _popup = null;
+        }
+
+        _popup.ShowForCurrentScreen();
+    }
+
+    private async void OnItemActivated(object? sender, ClipboardItem item)
+    {
+        if (_pasteService is null || _viewModel is null)
+        {
+            return;
+        }
+
+        await _pasteService.PasteAsync(item, _lastForegroundWindow);
+    }
+
+    private void ClearHistory()
+    {
+        var confirm = MessageBox.Show("Delete all clipboard history?", "Windows Paste",
+            MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+        if (confirm == MessageBoxResult.Yes)
+        {
+            _viewModel?.ClearAll();
+        }
+    }
+
+    private void ShowSettings()
+    {
+        if (_hotkeyManager is null)
+        {
+            return;
+        }
+
+        var window = new SettingsWindow(_settings);
+        var accepted = window.ShowDialog();
+
+        if (accepted != true)
+        {
+            return;
+        }
+
+        if (window.ResultHotkey is { } definition)
+        {
+            if (!_hotkeyManager.Register(definition))
+            {
+                _tray?.ShowBalloon("Hotkey unavailable",
+                    $"{definition.Display} is already used by another application.");
+            }
+        }
+
+        if (_viewModel is not null)
+        {
+            _viewModel.Reload();
+            _viewModel.RefreshHotkeyLabel();
+        }
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        _hotkeyManager?.Dispose();
+        _monitor?.Dispose();
+        _messageWindow?.Dispose();
+        _repository?.Dispose();
+        _tray?.Dispose();
+        _mutex?.Dispose();
+
+        base.OnExit(e);
+    }
+}
