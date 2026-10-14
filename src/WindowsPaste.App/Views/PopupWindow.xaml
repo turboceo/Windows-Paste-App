@@ -22,16 +22,66 @@
         <conv:ClipboardItemToBrushConverter x:Key="ItemBrush" />
         <conv:BoolToVisibilityConverter x:Key="BoolToVisibility" />
         <conv:ClipboardItemToGlyphBrushConverter x:Key="GlyphBrush" />
+        <conv:BoolToOpacityConverter x:Key="BoolToOpacity" />
 
-        <!-- One history card. Square, so the strip reads as a row of tiles. -->
+        <!--
+            Pin toggle on a card. Hidden until the card is hovered, and always
+            visible once pinned, so the badge does not clutter the idle grid.
+            Tag carries the item's Pinned flag. Declared before CardTemplate so
+            the card's DataTemplate can resolve it.
+        -->
+        <Style x:Key="PinButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="22" />
+            <Setter Property="Height" Value="22" />
+            <Setter Property="FontFamily" Value="Segoe MDL2 Assets, Segoe Fluent Icons" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="#FF8A8A92" />
+            <Setter Property="Content" Value="&#xE718;" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" CornerRadius="11" Background="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#22000000" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <!-- Hidden until the card is hovered; pinned cards keep it visible. -->
+            <Setter Property="Opacity">
+                <Setter.Value>
+                    <Binding Path="IsMouseOver"
+                             RelativeSource="{RelativeSource AncestorType=ListBoxItem}"
+                             Converter="{StaticResource BoolToOpacity}" />
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <!-- Pinned: always visible, filled glyph, amber tint -->
+                <Trigger Property="Tag" Value="True">
+                    <Setter Property="Opacity" Value="1" />
+                    <Setter Property="Foreground" Value="#FFB8860B" />
+                    <Setter Property="Content" Value="&#xE840;" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!--
+            One history card. The card fills its grid cell, and its height is
+            bound to its own width so it stays square however wide the cell is.
+        -->
         <DataTemplate x:Key="CardTemplate">
             <Border x:Name="Card"
-                    Width="172"
-                    Height="172"
+                    MinWidth="110" MinHeight="110"
                     CornerRadius="12"
                     BorderThickness="1"
                     BorderBrush="#1F000000"
-                    Background="{Binding Converter={StaticResource ItemBrush}}">
+                    Background="{Binding Converter={StaticResource ItemBrush}}"
+                    Height="{Binding ActualWidth, RelativeSource={RelativeSource Self}}">
                 <Grid Margin="12,10,12,8">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -39,7 +89,7 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <!-- Header: type glyph + type label -->
+                    <!-- Header: type glyph + type label, plus the pin toggle -->
                     <Grid Grid.Row="0">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="{Binding Converter={StaticResource TypeGlyph}}"
@@ -54,14 +104,15 @@
                                        Foreground="{Binding Converter={StaticResource GlyphBrush}}"
                                        VerticalAlignment="Center" />
                         </StackPanel>
-                        <TextBlock Grid.Column="0"
-                                   Text="PIN"
-                                   HorizontalAlignment="Right"
-                                   FontSize="9"
-                                   FontWeight="SemiBold"
-                                   Foreground="#FFB8860B"
-                                   Visibility="{Binding Pinned, Converter={StaticResource BoolToVisibility}}" />
-                    </Grid>
+
+                        <!-- Pin toggle: shown while pinned, or on card hover -->
+                        <Button x:Name="PinButton"
+                                Style="{StaticResource PinButtonStyle}"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Top"
+                                Tag="{Binding Pinned}"
+                                ToolTip="Pin (Ctrl+P)"
+                                Click="OnPinButtonClick" />                    </Grid>
 
                     <!-- Body: image thumbnail, or text preview -->
                     <Grid Grid.Row="1" Margin="0,8,0,8">
@@ -100,9 +151,9 @@
         -->
         <Style x:Key="CardContainerStyle" TargetType="ListBoxItem">
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Margin" Value="6,0" />
+            <Setter Property="Margin" Value="6" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Top" />
             <Setter Property="VerticalAlignment" Value="Top" />
             <Setter Property="Template">
@@ -115,6 +166,14 @@
                                 BorderBrush="Transparent"
                                 Background="Transparent"
                                 SnapsToDevicePixels="True">
+                            <Border.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Paste" Click="OnContextPaste" />
+                                    <MenuItem Header="Pin / Unpin" Click="OnContextPin" />
+                                    <Separator />
+                                    <MenuItem Header="Remove" Click="OnContextRemove" />
+                                </ContextMenu>
+                            </Border.ContextMenu>
                             <ContentPresenter />
                         </Border>
                         <ControlTemplate.Triggers>
@@ -182,7 +241,7 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <!-- Card strip, laid out from the top of the upper region -->
+            <!-- Card grid, laid out from the top of the upper region -->
             <Grid Grid.Row="0" Margin="10,16,10,6">
                 <ListBox x:Name="ItemsList"
                          ItemsSource="{Binding Items}"
@@ -195,12 +254,13 @@
                          VerticalContentAlignment="Top"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                          ScrollViewer.VerticalScrollBarVisibility="Auto"
+                         ScrollViewer.CanContentScroll="True"
                          MouseDoubleClick="OnItemActivated">
                     <ListBox.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <!-- Cards flow left-to-right and wrap onto the next
-                                 row, filling top-to-bottom as the list grows. -->
-                            <WrapPanel Orientation="Horizontal" />
+                            <!-- Columns is set from code to match the available
+                                 width, so every row fills edge to edge. -->
+                            <UniformGrid x:Name="CardGrid" Columns="6" VerticalAlignment="Top" />
                         </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
                 </ListBox>

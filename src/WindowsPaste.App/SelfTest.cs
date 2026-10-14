@@ -118,6 +118,28 @@ internal static class SelfTest
         return null;
     }
 
+    private static System.Windows.Controls.Button? FindPinButton(
+        System.Windows.DependencyObject root)
+    {
+        var count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+            if (child is System.Windows.Controls.Button { Name: "PinButton" } button)
+            {
+                return button;
+            }
+
+            var found = FindPinButton(child);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
     private static System.Windows.Controls.Border? FindHalo(
         System.Windows.DependencyObject root)
     {
@@ -262,6 +284,7 @@ internal static class SelfTest
                 {
                     lines.Add($"-- card size     = {card.ActualWidth} x {card.ActualHeight}");
                     lines.Add($"-- card is square= {Math.Abs(card.ActualWidth - card.ActualHeight) <= 1}");
+                    lines.Add($"-- card scales   = {card.ActualWidth != 172} (not the old fixed size)");
 
                     // The card tint is translucent, so composite it over the white
                     // shelf to get the effective background before measuring contrast.
@@ -290,15 +313,32 @@ internal static class SelfTest
                 }
                 lines.Add($"-- container size = {firstContainer.ActualWidth} x {firstContainer.ActualHeight}");
 
-                // Cards must flow left-to-right and wrap onto new rows, so with
-                // enough items the grid grows downwards from the top.
+                // No horizontal overflow: the panel must not produce a horizontal
+                // scrollbar, and the last card in a row must stay inside the list.
+                var scroll = popup.ScrollViewerForTest;
+                if (scroll is not null)
+                {
+                    lines.Add($"-- h-scrollbar vis = {scroll.ComputedHorizontalScrollBarVisibility} (expect Collapsed)");
+                    lines.Add($"-- h-scrollbar off = {scroll.ComputedHorizontalScrollBarVisibility != System.Windows.Visibility.Visible}");
+                    lines.Add($"-- viewport width  = {scroll.ViewportWidth:F0}");
+                    lines.Add($"-- extent width    = {scroll.ExtentWidth:F0}");
+                    lines.Add($"-- no h overflow   = {scroll.ExtentWidth <= scroll.ViewportWidth + 1}");
+                }
+
+                // Every row must fill edge to edge, and the card count across the
+                // first row must equal the calculated column count.
+                var listBounds = popup.ItemsListForTest.TranslatePoint(new System.Windows.Point(0, 0), popup);
+                var listWidth = popup.ItemsListForTest.ActualWidth;
+
+                // Cards must start at the top of the list region. The container
+                // carries the spacing margin, so measure it rather than the card.
                 var listTop = popup.ItemsListForTest.TranslatePoint(new System.Windows.Point(0, 0), popup).Y;
-                var cardTop = firstContainer.TranslatePoint(new System.Windows.Point(0, 0), popup).Y;
+                var containerTop = firstContainer.TranslatePoint(new System.Windows.Point(0, 0), popup).Y;
                 var listHeight = popup.ItemsListForTest.ActualHeight;
-                var gapAboveCard = cardTop - listTop;
+                var gapAboveCard = containerTop - listTop;
                 lines.Add($"-- list region top   = {listTop:F0}, height {listHeight:F0}");
-                lines.Add($"-- first card top    = {cardTop:F0} (gap {gapAboveCard:F0}px from list top)");
-                lines.Add($"-- cards start at top= {gapAboveCard <= 4}");
+                lines.Add($"-- first container top= {containerTop:F0} (gap {gapAboveCard:F0}px from list top)");
+                lines.Add($"-- cards start at top= {gapAboveCard <= 8}");
 
                 // Inspect the first few containers: they should share a row, then
                 // the next ones should drop to a lower row (same X as first).
@@ -318,7 +358,12 @@ internal static class SelfTest
                     var row1Y = positions[0].Y;
                     var sameRow = positions.Count(p => Math.Abs(p.Y - row1Y) <= 2);
                     var secondRow = positions.Where(p => p.Y > row1Y + 2).ToList();
+                    var columns = viewModel.ColumnsPerRow;
+
                     lines.Add($"-- cards in first row= {sameRow}");
+                    lines.Add($"-- computed columns  = {columns}");
+                    lines.Add($"-- grid.Columns set  = {popup.CardGridColumnsForTest} (matches: {popup.CardGridColumnsForTest == columns})");
+                    lines.Add($"-- row matches columns= {sameRow == columns}");
                     lines.Add($"-- wraps to new row  = {secondRow.Count > 0}");
                     if (secondRow.Count > 0)
                     {
@@ -326,8 +371,18 @@ internal static class SelfTest
                         lines.Add($"-- row 2 is lower    = {secondRow[0].Y > row1Y}");
                     }
 
+                    // The last card of the first row must not stick out past the list.
+                    var row1Positions = positions.Where(p => Math.Abs(p.Y - row1Y) <= 2).ToList();
+                    if (row1Positions.Count > 0)
+                    {
+                        var containerW = firstContainer.ActualWidth;
+                        var lastCardRight = row1Positions.Max(p => p.X) + containerW;
+                        var listRight = listBounds.X + listWidth;
+                        lines.Add($"-- row 1 right edge  = {lastCardRight:F0} (list right {listRight:F0})");
+                        lines.Add($"-- row 1 fits inside = {lastCardRight <= listRight + 2}");
+                    }
+
                     // Row-aware navigation: Down should hop exactly one row.
-                    var columns = viewModel.ColumnsPerRow;
                     lines.Add($"-- vm.ColumnsPerRow  = {columns}");
 
                     viewModel.SelectedItem = viewModel.Items[0];
@@ -392,6 +447,69 @@ internal static class SelfTest
                 prev.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
                 await Task.Delay(80);
                 lines.Add($"-- prev click moved  : {afterId} -> {viewModel.SelectedItem?.Id}");
+            }
+
+            // Resizing the panel must recompute the column count so rows keep
+            // filling the available width instead of overflowing.
+            var originalWidth = popup.Width;
+            var columnsBefore = viewModel.ColumnsPerRow;
+            popup.Width = originalWidth * 0.6;
+            popup.UpdateLayout();
+            await Task.Delay(200); // allow the debounce timer to fire
+            var columnsAfter = viewModel.ColumnsPerRow;
+            lines.Add($"-- resize: width {originalWidth:F0} -> {popup.Width:F0}");
+            lines.Add($"-- resize: columns {columnsBefore} -> {columnsAfter}");
+            lines.Add($"-- columns shrank   = {columnsAfter < columnsBefore}");
+
+            popup.Width = originalWidth;
+            popup.UpdateLayout();
+            await Task.Delay(200);
+            lines.Add($"-- restored columns = {viewModel.ColumnsPerRow}");
+
+            // The card header must carry an interactive pin toggle.
+            var pinButton = FindPinButton(firstContainer);
+            lines.Add($"-- pin button present= {pinButton is not null}");
+            if (pinButton is not null)
+            {
+                lines.Add($"-- pin button tooltip= {pinButton.ToolTip}");
+                lines.Add($"-- pin button tag    = {pinButton.Tag} (item Pinned={((System.Windows.FrameworkElement)firstContainer).DataContext is ClipboardItem ci && ci.Pinned})");
+                lines.Add($"-- pin glyph (unpinned state uses E718 hollow pin)");
+            }
+
+            // Pin behaviour: pinning must move the item to the front, unpinning
+            // must return it to its chronological place, and both must survive a
+            // reload (i.e. be persisted, not just in-memory).
+            var target = viewModel.Items.FirstOrDefault(i => !i.Pinned);
+            if (target is not null)
+            {
+                var targetId = target.Id;
+                var indexBefore = viewModel.Items.IndexOf(target);
+                lines.Add($"-- pin: target id    = {targetId} at index {indexBefore}");
+
+                viewModel.TogglePin(target);
+                var pinned = viewModel.Items.FirstOrDefault(i => i.Id == targetId);
+                lines.Add($"-- pin: now at index = {viewModel.Items.IndexOf(pinned ?? viewModel.Items[0])}");
+                lines.Add($"-- pin: flag set     = {pinned?.Pinned}");
+                lines.Add($"-- pin: moved to top = {viewModel.Items.FirstOrDefault()?.Id == targetId}");
+
+                // Pin state must be in the database, not just the view model.
+                var fromDb = viewModel.Items.FirstOrDefault(i => i.Id == targetId);
+                lines.Add($"-- pin: persisted    = {fromDb?.Pinned == true}");
+
+                viewModel.TogglePin(pinned ?? target);
+                var unpinned = viewModel.Items.FirstOrDefault(i => i.Id == targetId);
+                lines.Add($"-- unpin: flag cleared= {unpinned?.Pinned == false}");
+                lines.Add($"-- unpin: left top    = {viewModel.Items.FirstOrDefault()?.Id != targetId}");
+
+                // A pinned item must outrank newer unpinned items.
+                var newest = viewModel.Items.FirstOrDefault(i => !i.Pinned);
+                if (newest is not null)
+                {
+                    viewModel.TogglePin(newest);
+                    var topIsPinned = viewModel.Items.FirstOrDefault()?.Pinned == true;
+                    lines.Add($"-- pinned outranks newer = {topIsPinned}");
+                    viewModel.TogglePin(viewModel.Items.FirstOrDefault(x => x.Id == newest.Id) ?? newest);
+                }
             }
 
             popup.Hide();

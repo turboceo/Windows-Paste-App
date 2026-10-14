@@ -11,7 +11,8 @@ and paste any entry straight back into the app you were using.
 - The panel is centred on the monitor under the cursor, spanning 90% of its width and 60% of its height
 - Vertical layout: the card strip fills the top, with a toolbar along the bottom
 - Toolbar holds the search box on the left and previous/next navigation on the right
-- History appears as a wrapping grid of square cards: left-to-right, then onto the next row, filling top-to-bottom
+- History appears as an auto-fitting grid of square cards: the column count is derived from the available width, so every row fills edge to edge with no horizontal scrolling
+- Pin entries to keep them at the top: click the pin button on a card, press `Ctrl+P`, or right-click the card
 - Cards are tinted by type (text / image / files) with image thumbnails inline
 - Captures text, images, and copied files
 - Search filters the strip live and rewinds it to the first match
@@ -60,7 +61,7 @@ src/WindowsPaste.App/
     PopupWindow.xaml(.cs)       The bottom shelf UI
     SettingsWindow.xaml(.cs)    Hotkey / capacity / theme / startup
     TrayIcon.cs                 NotifyIcon with context menu
-  Converters/                   Type glyph, thumbnail, card colour, visibility
+  Converters/                   Type glyph, thumbnail, card colour, visibility, opacity
   SelfTest.cs                   Debug-only layout harness (--selftest)
   DevSeed.cs                    Debug-only sample data seeder (--seed)
 ```
@@ -106,7 +107,8 @@ Output lands in `src/WindowsPaste.App/bin/Release/net10.0-windows/win-x64/publis
 - [ ] Confirm the panel spans 90% of the screen width and 60% of its height, centred
 - [ ] Confirm the layout is vertical: cards on top, toolbar along the bottom
 - [ ] Confirm cards stack from the top of the list area, not vertically centred
-- [ ] Confirm cards fill left-to-right, then wrap onto the next row
+- [ ] Confirm rows fill the panel edge to edge with no horizontal scrollbar
+- [ ] Resize the panel (or open on a different-resolution monitor) and confirm the card size and column count re-fit
 - [ ] Confirm `Down`/`Up` move by a whole row and `Left`/`Right` move within a row
 - [ ] Confirm the toolbar has the search box on the left and prev/next arrows on the right
 - [ ] Click the arrows and confirm the selection moves between cards (disabled at each end)
@@ -122,6 +124,10 @@ Output lands in `src/WindowsPaste.App/bin/Release/net10.0-windows/win-x64/publis
 - [ ] Copy files in Explorer and confirm a file-list card appears
 - [ ] Copying the same text twice does not create duplicate entries
 - [ ] `Ctrl+P` pins an entry; `Del` removes it
+- [ ] Hover a card and confirm a pin button appears in its top-right; click it and the card jumps to the front
+- [ ] Right-click a card and confirm the Paste / Pin / Remove menu appears
+- [ ] Confirm a pinned card keeps its amber filled pin icon and stays above newer entries
+- [ ] Confirm pinning survives closing and reopening the panel
 - [ ] Tray menu: pause capture stops new entries; clear history empties the shelf
 - [ ] Change the hotkey in Settings and confirm the new combination opens the shelf
 - [ ] Enable "Start with Windows" and confirm the registry Run value is created

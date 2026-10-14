@@ -10,12 +10,16 @@ public partial class PopupWindow : Window
 {
     private const double SlideDistance = 100;
 
+    /// <summary>Target width of one card cell, including its margins.</summary>
+    private const double CardCellWidth = 184;
+
     /// <summary>Panel occupies these fractions of the monitor's working area.</summary>
     private const double WidthFraction = 0.9;
     private const double HeightFraction = 0.6;
 
     private bool _allowDeactivateClose = true;
     private double _restingTop;
+    private System.Windows.Threading.DispatcherTimer? _resizeDebounce;
 
     public PopupWindow(MainViewModel viewModel)
     {
@@ -38,55 +42,85 @@ public partial class PopupWindow : Window
             UpdateColumnsPerRow();
         };
 
-        // The card width is fixed, so remeasure the column count on resize.
-        SizeChanged += (_, _) => UpdateColumnsPerRow();
+        // The card width is fixed, so remeasure the column count on resize. A
+        // short debounce avoids re-laying out on every pixel of a window drag.
+        _resizeDebounce = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(60),
+        };
+        _resizeDebounce.Tick += (_, _) =>
+        {
+            _resizeDebounce.Stop();
+            UpdateColumnsPerRow();
+        };
+
+        SizeChanged += (_, _) =>
+        {
+            if (_resizeDebounce is null)
+            {
+                return;
+            }
+
+            _resizeDebounce.Stop();
+            _resizeDebounce.Start();
+        };
     }
 
     /// <summary>
-    /// Counts how many cards fit across the grid so Up/Down can move by whole
-    /// rows. Measured from the rendered containers rather than assumed.
+    /// Chooses how many cards fit across the grid so every row fills the panel
+    /// edge to edge. The count drives the UniformGrid, rather than being measured
+    /// from it, which is what keeps the layout from overflowing horizontally.
     /// </summary>
     private void UpdateColumnsPerRow()
     {
-        if (ViewModel is null || ItemsList.ActualWidth <= 0)
+        var grid = FindUniformGrid(ItemsList);
+        var available = ItemsList.ActualWidth;
+        if (grid is null || available <= 0)
         {
             return;
         }
 
-        var count = Math.Min(ViewModel.Items.Count, 64);
-        if (count == 0)
-        {
-            ViewModel.ColumnsPerRow = 1;
-            return;
-        }
-
-        ItemsList.UpdateLayout();
-
-        var first = ItemsList.ItemContainerGenerator.ContainerFromIndex(0) as System.Windows.FrameworkElement;
-        if (first is null || first.ActualWidth <= 0)
+        // Subtract the padding the ListBox adds around the panel.
+        var usable = available - ItemsList.Padding.Left - ItemsList.Padding.Right;
+        if (usable <= 0)
         {
             return;
         }
 
-        // Count containers sharing the first card's row.
-        var rowTop = first.TranslatePoint(new System.Windows.Point(0, 0), ItemsList).Y;
-        var columns = 0;
+        // Each cell is CardCellWidth wide including its margins.
+        var columns = Math.Max(1, (int)Math.Floor(usable / CardCellWidth));
+
+        // Avoid re-laying out when nothing actually changed.
+        if (grid.Columns == columns && ViewModel.ColumnsPerRow == columns)
+        {
+            return;
+        }
+
+        grid.Columns = columns;
+        ViewModel.ColumnsPerRow = columns;
+    }
+
+    /// <summary>Finds the UniformGrid inside the ListBox's items presenter.</summary>
+    private static System.Windows.Controls.Primitives.UniformGrid? FindUniformGrid(
+        System.Windows.DependencyObject root)
+    {
+        if (root is System.Windows.Controls.Primitives.UniformGrid grid)
+        {
+            return grid;
+        }
+
+        var count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
         for (var i = 0; i < count; i++)
         {
-            if (ItemsList.ItemContainerGenerator.ContainerFromIndex(i)
-                is System.Windows.FrameworkElement container)
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+            var found = FindUniformGrid(child);
+            if (found is not null)
             {
-                var top = container.TranslatePoint(new System.Windows.Point(0, 0), ItemsList).Y;
-                if (Math.Abs(top - rowTop) > 2)
-                {
-                    break;
-                }
-
-                columns++;
+                return found;
             }
         }
 
-        ViewModel.ColumnsPerRow = Math.Max(1, columns);
+        return null;
     }
 
     private static System.Windows.Controls.ScrollViewer? FindScrollViewer(
@@ -120,6 +154,8 @@ public partial class PopupWindow : Window
     internal double RestingTopForTest => _restingTop;
     internal System.Windows.Controls.Button PrevButtonForTest => PrevButton;
     internal System.Windows.Controls.Button NextButtonForTest => NextButton;
+    internal int CardGridColumnsForTest => FindUniformGrid(ItemsList)?.Columns ?? -1;
+    internal System.Windows.Controls.ScrollViewer? ScrollViewerForTest => FindScrollViewer(ItemsList);
 
     public event EventHandler<ClipboardItem>? ItemActivated;
     public event EventHandler<ClipboardItem>? ItemDeleted;
@@ -351,6 +387,57 @@ public partial class PopupWindow : Window
     {
         ViewModel.MoveSelection(1);
         ScrollSelectionIntoView();
+    }
+
+    /// <summary>Pin toggle on a card header. The sender's DataContext is the item.</summary>
+    private void OnPinButtonClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.FrameworkElement { DataContext: ClipboardItem item })
+        {
+            ItemPinToggled?.Invoke(this, item);
+        }
+    }
+
+    private void OnContextPaste(object sender, RoutedEventArgs e)
+    {
+        if (ResolveContextItem(sender) is { } item)
+        {
+            ViewModel.SelectedItem = item;
+            ActivateSelected();
+        }
+    }
+
+    private void OnContextPin(object sender, RoutedEventArgs e)
+    {
+        if (ResolveContextItem(sender) is { } item)
+        {
+            ItemPinToggled?.Invoke(this, item);
+        }
+    }
+
+    private void OnContextRemove(object sender, RoutedEventArgs e)
+    {
+        if (ResolveContextItem(sender) is { } item)
+        {
+            ItemDeleted?.Invoke(this, item);
+        }
+    }
+
+    /// <summary>
+    /// Walks up from a context menu item to the card it belongs to. Menu items
+    /// live in a separate visual tree, so the item is read from the placement
+    /// target that the menu was opened against.
+    /// </summary>
+    private ClipboardItem? ResolveContextItem(object sender)
+    {
+        if (sender is System.Windows.Controls.MenuItem menuItem
+            && menuItem.Parent is System.Windows.Controls.ContextMenu { PlacementTarget: var target }
+            && target is System.Windows.FrameworkElement { DataContext: ClipboardItem item })
+        {
+            return item;
+        }
+
+        return ViewModel.SelectedItem;
     }
 
     private void ActivateSelected()
