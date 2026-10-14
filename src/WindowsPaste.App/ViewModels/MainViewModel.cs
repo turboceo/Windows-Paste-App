@@ -64,6 +64,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
+    private int _totalCount;
+    public int TotalCount
+    {
+        get => _totalCount;
+        private set => SetField(ref _totalCount, value);
+    }
+
     public bool IsEmpty
     {
         get => _isEmpty;
@@ -96,6 +103,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
 
         IsEmpty = Items.Count == 0;
+        TotalCount = _repository.GetTotalCount();
 
         SelectedItem = selectedId is null
             ? Items.FirstOrDefault()

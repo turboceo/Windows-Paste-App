@@ -120,6 +120,13 @@ public sealed class ClipboardRepository : IDisposable
         return ReadAll(command).FirstOrDefault();
     }
 
+    public int GetTotalCount()
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM ClipboardItems";
+        return Convert.ToInt32(command.ExecuteScalar() ?? 0);
+    }
+
     public void SetPinned(long id, bool pinned)
     {
         using var command = _connection.CreateCommand();

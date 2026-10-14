@@ -102,46 +102,15 @@ internal static class NativeMethods
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
-    // --- Native window blur (acrylic) for the frosted shelf background ---
+    // --- Window attributes (official DWM APIs) ---
 
     [DllImport("dwmapi.dll")]
     public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern int SetWindowCompositionAttribute(IntPtr hwnd, ref WindowCompositionAttributeData data);
-
     public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    public const int DWMWCP_DONOTROUND = 1;
     public const int DWMWCP_ROUND = 2;
-
-    public const int WCA_ACCENT_POLICY = 19;
-
-    public enum AccentState
-    {
-        Disabled = 0,
-        Gradient = 1,
-        TransparentGradient = 2,
-        BlurBehind = 3,
-        AcrylicBlurBehind = 4,
-        HostBackdrop = 5,
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct AccentPolicy
-    {
-        public AccentState AccentState;
-        public int AccentFlags;
-        public int GradientColor;
-        public int AnimationId;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct WindowCompositionAttributeData
-    {
-        public int Attribute;
-        public IntPtr Data;
-        public int SizeOfData;
-    }
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     public static extern uint DragQueryFile(IntPtr hDrop, uint iFile, System.Text.StringBuilder? lpszFile, uint cch);

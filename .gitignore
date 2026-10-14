@@ -1,5 +1,100 @@
-bin/
-obj/
+# ==========================================
+# Windows Paste App - Git Ignore Rules
+# ==========================================
+
+# ------------------------------------------
+# 1. .NET / C# / Build Outputs
+# ------------------------------------------
+[Bb]in/
+[Oo]bj/
+[Aa]pp_data/
+[Pp]ublish/
+publish/
+
+# NuGet & packages
+*.nupkg
+packages/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Visual Studio & MSBuild temporary files
 .vs/
 *.user
 *.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.pidb
+*.vshost.exe
+*.vshost.exe.manifest
+*.vshost.exe.config
+
+# JetBrains Rider & ReSharper
+.idea/
+_ReSharper*/
+*.DotSettings.user
+
+# ------------------------------------------
+# 2. Node.js / Vite / Vue Frontend (web/)
+# ------------------------------------------
+node_modules/
+dist/
+web/dist/
+
+# Vite cache & TypeScript build info
+.vite/
+*.tsbuildinfo
+
+# Node logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Local environment variables
+.env.local
+.env.*.local
+
+# ------------------------------------------
+# 3. Local Databases & Diagnostics
+# ------------------------------------------
+# SQLite runtime files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Test & diagnostic dump outputs
+webhost.txt
+selftest.txt
+seed.txt
+*.log
+
+# ------------------------------------------
+# 4. Editors & Operating System
+# ------------------------------------------
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# VS Code / Cursor workspace settings
+# (Ignore local workspace states, allow shared configs if added in the future)
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.cursor/
+*.code-workspace

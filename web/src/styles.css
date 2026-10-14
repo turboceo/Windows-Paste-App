@@ -1,0 +1,84 @@
+:root {
+  /* Panel background */
+  --panel-bg: rgba(246, 248, 251, 0.92);
+  --panel-border: rgba(0, 0, 0, 0.08);
+  --panel-shadow: 0 24px 60px -12px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(0, 0, 0, 0.06);
+
+  --text-main: #1e293b;
+  --text-muted: #64748b;
+  --text-dim: #94a3b8;
+
+  /* Paste.app-style soft pastel card backgrounds & accents */
+  --paste-bg-text: #f4f8fe;
+  --paste-accent-text: #2563eb;
+  --paste-border-text: rgba(37, 99, 235, 0.12);
+
+  --paste-bg-link: #edfcf6;
+  --paste-accent-link: #059669;
+  --paste-border-link: rgba(5, 150, 105, 0.14);
+
+  --paste-bg-image: #f8fafc;
+  --paste-accent-image: #ea580c;
+  --paste-border-image: rgba(234, 88, 12, 0.12);
+
+  --paste-bg-color: #faf5ff;
+  --paste-accent-color: #9333ea;
+  --paste-border-color: rgba(147, 51, 234, 0.14);
+
+  --paste-bg-files: #fffef2;
+  --paste-accent-files: #d97706;
+  --paste-border-files: rgba(217, 119, 6, 0.14);
+
+  /* Card shadow & Paste.app signature blue selection ring */
+  --card-shadow: 0 2px 7px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.02);
+  --card-shadow-hover: 0 8px 20px -3px rgba(15, 23, 42, 0.09), 0 3px 6px -1px rgba(15, 23, 42, 0.04);
+  --paste-selected-ring: 0 0 0 3px #007aff, 0 10px 24px rgba(0, 122, 255, 0.26);
+
+  --pin-amber: #d97706;
+  --pin-amber-bg: rgba(245, 158, 11, 0.15);
+
+  --radius-panel: 0px;
+  --radius-card: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+  color: var(--text-main);
+  background: transparent;
+  user-select: none;
+  cursor: default;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  height: 100%;
+}
+
+/* Elegant sleek scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.2);
+  border-radius: 999px;
+  transition: background 150ms ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.38);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}

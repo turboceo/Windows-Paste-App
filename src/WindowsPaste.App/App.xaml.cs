@@ -23,9 +23,10 @@ public partial class App : Application
     private ClipboardRepository? _repository;
     private PasteService? _pasteService;
     private MainViewModel? _viewModel;
-    private PopupWindow? _popup;
+    private PopupHostWindow? _popup;
     private TrayIcon? _tray;
     private AppSettings _settings = new();
+    private string _blobRoot = string.Empty;
     private IntPtr _lastForegroundWindow;
     private DateTime _lastHotkeyTime = DateTime.MinValue;
 
@@ -70,15 +71,35 @@ public partial class App : Application
             return;
         }
 
-        if (e.Args.Any(arg => string.Equals(arg, "--selftest", StringComparison.OrdinalIgnoreCase))
-            && _viewModel is not null)
+        if (e.Args.Any(arg => string.Equals(arg, "--webhost", StringComparison.OrdinalIgnoreCase)))
         {
 #if DEBUG
-            var paths = new AppPaths();
-            _ = SelfTest.RunAsync(_viewModel, paths);
+            _ = RunWebHostCheckAsync();
 #endif
         }
     }
+
+#if DEBUG
+    /// <summary>
+    /// Opens the web-hosted popup, lets it render, then shuts down. Used to
+    /// verify the WebView2 pipeline without a human watching the screen.
+    /// </summary>
+    private async Task RunWebHostCheckAsync()
+    {
+        // Give the services a moment to settle before opening the popup.
+        await Task.Delay(300);
+
+        var reportPath = System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "WindowsPaste", "webhost.txt");
+        System.IO.File.Delete(reportPath);
+
+        ShowPopup();
+
+        await Task.Delay(6000);
+        Shutdown();
+    }
+#endif
 
 #if DEBUG
     /// <summary>
@@ -114,9 +135,7 @@ public partial class App : Application
         var paths = new AppPaths();
         _sniffer = new ClipboardSniffer(paths.Blobs);
         _repository = new ClipboardRepository(paths.Database, _settings.HistoryCapacity);
-
-        // Lets the image card converter resolve blob file names to absolute paths.
-        Converters.TypeToThumbnailConverter.BlobDirectory = paths.Blobs;
+        _blobRoot = paths.Blobs;
 
         _messageWindow = new MessageWindow();
         _messageWindow.EnsureCreated();
@@ -209,7 +228,9 @@ public partial class App : Application
 
         if (_popup is null)
         {
-            _popup = new PopupWindow(_viewModel);
+            // WebView2 startup is expensive, so the host is created once and
+            // reused for the life of the process rather than per open.
+            _popup = new PopupHostWindow(_viewModel, WebRootPath(), _blobRoot);
             _popup.ItemActivated += OnItemActivated;
             _popup.ItemDeleted += (_, item) => _viewModel?.Delete(item);
             _popup.ItemPinToggled += (_, item) => _viewModel?.TogglePin(item);
@@ -217,6 +238,25 @@ public partial class App : Application
         }
 
         _popup.ShowForCurrentScreen();
+    }
+
+    /// <summary>Folder containing the built Vue assets, copied next to the exe.</summary>
+    private static string WebRootPath()
+    {
+        var baseDirectory = AppContext.BaseDirectory;
+        var candidate = System.IO.Path.Combine(baseDirectory, "web");
+
+        if (System.IO.File.Exists(System.IO.Path.Combine(candidate, "index.html")))
+        {
+            return candidate;
+        }
+
+        // Development fallback: run from the repository so a fresh `npm run build`
+        // is picked up without a .NET rebuild.
+        var repository = System.IO.Path.GetFullPath(
+            System.IO.Path.Combine(baseDirectory, "..", "..", "..", "..", "..", "web", "dist"));
+
+        return System.IO.Directory.Exists(repository) ? repository : candidate;
     }
 
     private async void OnItemActivated(object? sender, ClipboardItem item)

@@ -1,0 +1,18 @@
+<Window x:Class="WindowsPaste.Views.PopupHostWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="Windows Paste"
+        Height="600"
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        Background="#FFF6F8FB"
+        ShowInTaskbar="False"
+        Topmost="True"
+        ShowActivated="True"
+        WindowStartupLocation="Manual"
+        Deactivated="OnDeactivated"
+        PreviewKeyDown="OnPreviewKeyDown">
+
+    <wv2:WebView2 x:Name="Web" DefaultBackgroundColor="#FFF6F8FB" />
+</Window>

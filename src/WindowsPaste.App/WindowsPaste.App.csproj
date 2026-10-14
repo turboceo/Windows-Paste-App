@@ -18,6 +18,35 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
   </ItemGroup>
 
+  <!--
+    The popup UI is a Vue app built by Vite. Its output is copied next to the
+    executable under web/, and the host serves it from a virtual origin.
+
+    Build everything (including the web UI) with:
+      dotnet build -p:BuildWebUi=true
+    Keeping the node step opt-in means ordinary .NET builds do not need Node.
+  -->
+  <ItemGroup>
+    <WebUiFile Include="$(MSBuildProjectDirectory)\..\..\web\dist\**\*" />
+    <Content Include="@(WebUiFile)"
+             Link="web\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="BuildWebUi" BeforeTargets="PrepareForBuild" Condition="'$(BuildWebUi)' == 'true'">
+    <Exec Command="npm ci" WorkingDirectory="$(MSBuildProjectDirectory)\..\..\web" />
+    <Exec Command="npm run build" WorkingDirectory="$(MSBuildProjectDirectory)\..\..\web" />
+    <ItemGroup>
+      <WebUiFile Remove="@(WebUiFile)" />
+      <WebUiFile Include="$(MSBuildProjectDirectory)\..\..\web\dist\**\*" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="WarnIfWebUiMissing" AfterTargets="Build">
+    <Warning Condition="!Exists('$(MSBuildProjectDirectory)\..\..\web\dist\index.html')"
+              Text="The web UI has not been built. The popup will not load until you run: npm install &amp;&amp; npm run build in the web folder (or build with -p:BuildWebUi=true)." />
+  </Target>
 </Project>
