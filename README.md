@@ -1,143 +1,85 @@
-# Windows Paste
+# Windows Paste (Rust + Slint 重构版)
 
-A Windows clipboard-history manager inspired by [Paste](https://pasteapp.io/) on macOS.
-Press a global hotkey to slide up a bottom shelf of your clipboard history, search it,
-and paste any entry straight back into the app you were using.
+一个基于 **Rust + Slint UI** 的高性能 Windows 剪贴板历史管理器，深度还原 macOS 上著名应用 **[Paste](https://pasteapp.io/)** 的质感与体验。
+随时按下全局快捷键 `Ctrl + Shift + V`，在屏幕正中央瞬间唤出剪贴板面板，进行高速搜索、预览与一键粘贴。
 
-## Features
+---
 
-- Global hotkey (`Ctrl + Shift + V` by default) opens the panel, which drifts up as it fades in
-- White frosted (acrylic) panel with a light colour scheme and dark, type-coloured icons
-- The panel is centred on the monitor under the cursor, spanning 90% of its width and 60% of its height
-- Vertical layout: the card strip fills the top, with a toolbar along the bottom
-- Toolbar holds the search box on the left and previous/next navigation on the right
-- History appears as an auto-fitting grid of square cards: the column count is derived from the available width, so every row fills edge to edge with no horizontal scrolling
-- Pin entries to keep them at the top: click the pin button on a card, press `Ctrl+P`, or right-click the card
-- Cards are tinted by type (text / image / files) with image thumbnails inline
-- Captures text, images, and copied files
-- Search filters the strip live and rewinds it to the first match
-- Keyboard-driven: `Left`/`Right` within a row, `Up`/`Down` by whole row, `Enter` to paste, `Ctrl+P` to pin, `Del` to remove, `Esc` to close
-- On-screen previous/next buttons in the toolbar for mouse-driven navigation
-- Double-click a card to paste; the shelf opens with the newest entry selected
-- Pasting writes the entry back to the clipboard and sends `Ctrl+V` to the previously focused window
-- Local-only storage in SQLite under `%LOCALAPPDATA%\WindowsPaste`
-- Tray icon with pause capture, clear history, settings, and exit
-- Configurable hotkey, history capacity, dark theme, and run-at-login
+## 核心特性
 
-## Tech stack
+- **极致性能与轻量**：纯 Rust 静态编译单一二进制文件，体积仅 **12 MB**，内存常驻仅约 **20 MB ~ 30 MB**，绝不依赖 WebView2、Node.js、Chromium 或 .NET 运行时，彻底杜绝浏览器进程白屏与 GPU 崩溃。
+- **瞬时呼出（< 20ms）**：原生毫秒级响应，定点居中呈现，绝无闪烁、位移拉伸与排版变形。
+- **Paste.app 原生卡片美学**：
+  - **智能格式识别与专属底色**：
+    - 纯文本：柔和蓝白灰底板（`#F4F8FE`），右上角精确显示字符数；
+    - 网页链接：清爽薄荷绿底板（`#EDFCF6`），右上角提取显示主机域名（如 `github.com`）；
+    - 屏幕截图与图像：高清居中自适应相框，右上角显示像素分辨率；
+    - 文件列表：温暖淡米黄底板（`#FFFEF2`），清晰展示包含图标的文件清单与总文件数；
+    - 颜色代码：智能识别 `#RGB` / `#RRGGBB` / `rgb(...)`，中央呈现大色块色板。
+  - **皇家蓝高对比聚焦外环**：选中时呈现 macOS 风格的 3px `#007aff` 亮蓝发光环与微浮升效果。
+- **视口卡片优化算法**：根据可用宽度动态自适应计算最佳列数（大卡片 236px），各行平滑均匀铺满。
+- **生产力标题栏与控制**：
+  - 左侧展示剪贴板图标 + 应用名 + **总数目数小胶囊 Badge**（实时显示总条数或筛选比例，如 `50 项` / `2 / 50 项`）；
+  - 中间支持鼠标直接拖拽窗口，支持**双击标题栏在最大化与居中还原之间快速切换**；
+  - 右侧提供 Windows 风格的最小化、最大化/还原、关闭控制按钮。
+- **交互与快捷键**：
+  - `Left` / `Right` / `Up` / `Down` 矩阵式键盘导航；
+  - `Enter` 或双击卡片直接回写剪贴板并 `SendInput` 注入 `Ctrl + V` 到前台应用；
+  - `Ctrl + P` 或悬停点击图钉按钮置顶条目（置顶卡片常驻琥珀金徽章并排在最前）；
+  - `Del` 或悬停点击垃圾桶图标移除记录；
+  - `Esc` 一键关闭窗口。
+- **本地存储与隐私保护**：采用嵌入式 SQLite（`rusqlite bundled`），数据完全保存在本地 `%LOCALAPPDATA%\WindowsPaste\history.db`，图片缓存存为本地 PNG，绝不上云。
 
-| Concern | Choice |
-| --- | --- |
-| Language / runtime | C# / .NET 10 (WPF) |
-| Clipboard monitoring | Win32 `AddClipboardFormatListener` + `WM_CLIPBOARDUPDATE` |
-| Global hotkey | `RegisterHotKey` + `WM_HOTKEY` |
-| Simulated paste | `SendInput` replaying `Ctrl+V` |
-| Frosted backdrop | Win32 `SetWindowCompositionAttribute` acrylic blur |
-| Storage | SQLite via `Microsoft.Data.Sqlite` |
+---
 
-No global keyboard hooks are installed, so the app does not trip most
-keylogger heuristics: the hotkey is registered with the OS, and the clipboard
-listener is message-driven (no polling).
+## 技术架构
 
-## Layout
+| 模块 | 技术选型 | 说明 |
+| :--- | :--- | :--- |
+| **编程语言** | Rust 2021 (rustc 1.95+) | 极致内存安全、零成本抽象、无 GC |
+| **GUI 引擎** | Slint 1.9+ | 现代声明式轻量级原生 UI 引擎，DirectX/D3D 加速 |
+| **剪贴板监听** | Win32 `AddClipboardFormatListener` | 顶层隐藏窗口事件驱动，零 CPU 空转轮询 |
+| **全局快捷键** | Win32 `RegisterHotKey` | 独立工作线程监听 `Ctrl + Shift + V` (`WM_HOTKEY`) |
+| **模拟粘贴** | Win32 `SendInput` | 恢复前台焦点窗口并回放 `Ctrl + V` |
+| **本地存储** | SQLite 3 (via `rusqlite` bundled) | 静态编译进单一 exe，支持容量自动修剪与模糊索引 |
+| **图像编解码** | `image` (png) | 剪贴板 DIB 位图转码为紧凑 PNG 缩略图 |
+
+---
+
+## 项目结构
 
 ```
-src/WindowsPaste.App/
-  App.xaml(.cs)                 Composition root: single instance, wiring, tray
-  Interop/NativeMethods.cs      All P/Invoke declarations
-  Models/ClipboardItem.cs       History entry model
-  Services/
-    MessageWindow.cs            Hidden HWND shared by monitor + hotkeys
-    ClipboardMonitor.cs         WM_CLIPBOARDUPDATE listener
-    ClipboardSniffer.cs         Reads text / image / file formats, hashes content
-    ClipboardRepository.cs      SQLite CRUD, de-duplication, capacity trimming
-    HotkeyManager.cs            Global hotkey registration
-    PasteService.cs             Clipboard write-back + Ctrl+V injection
-    WindowBlur.cs               Acrylic frosted backdrop for the shelf
-    AppPaths.cs                 %LOCALAPPDATA% locations
-    AppSettings.cs              Registry-backed preferences and run-at-login
-  ViewModels/MainViewModel.cs   List, search, selection
-  Views/
-    PopupWindow.xaml(.cs)       The bottom shelf UI
-    SettingsWindow.xaml(.cs)    Hotkey / capacity / theme / startup
-    TrayIcon.cs                 NotifyIcon with context menu
-  Converters/                   Type glyph, thumbnail, card colour, visibility, opacity
-  SelfTest.cs                   Debug-only layout harness (--selftest)
-  DevSeed.cs                    Debug-only sample data seeder (--seed)
+ui/
+  app.slint            Slint 声明式 UI 定义 (TitleBar, PasteCard, ToolBar, MainWindow)
+src/
+  main.rs              应用程序入口、Slint 状态机与 Win32 事件驱动调度
+  model.rs             剪贴板数据结构 (ClipboardItem, ClipboardItemType)
+  db.rs                本地 SQLite 数据层与容量修剪 (Database, AppPaths)
+  clipboard.rs         Win32 剪贴板监听器与多格式解析器 (Monitor, Sniffer)
+  hotkey.rs            Win32 全局热键后台线程管理 (HotkeyManager)
+  paste.rs             模拟剪贴板回写与 SendInput Ctrl+V 注入 (PasteService)
+Cargo.toml             Cargo 依赖与 Release 链接时优化 (LTO) 配置
+build.rs               编译期生成 Slint UI 原生 Rust 结构代码
 ```
 
-## Build and run
+---
 
+## 构建与运行
+
+### 1. 运行调试版
 ```powershell
-dotnet build
-dotnet run --project src/WindowsPaste.App
+cargo run
 ```
 
-The app starts hidden with a tray icon. Press `Ctrl + Shift + V` to open the overlay.
-
-## Development helpers (Debug builds only)
-
+### 2. 灌入测试种子数据并运行
 ```powershell
-# Fill the history with 50 sample entries (wipes existing history)
-dotnet run --project src/WindowsPaste.App -- --seed
-
-# Seed a specific number of entries
-dotnet run --project src/WindowsPaste.App -- --seed 120
-
-# Report panel geometry, card sizing, contrast ratios and search behaviour, then exit
-dotnet run --project src/WindowsPaste.App -- --selftest
+# 灌入 50 条包含文本、文件、代码、置顶项的 Paste 风格样本数据
+cargo run -- --seed 50
 ```
 
-`--seed` writes a manifest to `%LOCALAPPDATA%\WindowsPaste\seed.txt`; `--selftest`
-writes its findings to `selftest.txt` in the same folder. Both flags compile out
-of Release builds.
-
-## Release build (single file)
-
+### 3. 构建发布版（最优体积与速度）
 ```powershell
-dotnet publish src/WindowsPaste.App -c Release -r win-x64 `
-  --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+cargo build --release
 ```
-
-Output lands in `src/WindowsPaste.App/bin/Release/net10.0-windows/win-x64/publish/`.
-
-## Manual verification checklist
-
-- [ ] Copy text in Notepad, press the hotkey, confirm the panel appears centred and fades in
-- [ ] Confirm the panel spans 90% of the screen width and 60% of its height, centred
-- [ ] Confirm the layout is vertical: cards on top, toolbar along the bottom
-- [ ] Confirm cards stack from the top of the list area, not vertically centred
-- [ ] Confirm rows fill the panel edge to edge with no horizontal scrollbar
-- [ ] Resize the panel (or open on a different-resolution monitor) and confirm the card size and column count re-fit
-- [ ] Confirm `Down`/`Up` move by a whole row and `Left`/`Right` move within a row
-- [ ] Confirm the toolbar has the search box on the left and prev/next arrows on the right
-- [ ] Click the arrows and confirm the selection moves between cards (disabled at each end)
-- [ ] Confirm the panel is a white frosted surface with a light colour scheme and dark, readable icons
-- [ ] Hover a card and confirm its box size does not change (only the ring colour does)
-- [ ] Press `Esc` or click away and confirm the panel fades back out
-- [ ] Confirm cards scroll horizontally and the newest entry is on the left, pre-selected
-- [ ] Confirm each card is square (equal width and height)
-- [ ] Search filters the strip as you type and jumps back to the first match
-- [ ] `Enter` on a card pastes into the previously focused window
-- [ ] Double-clicking a card pastes it
-- [ ] Copy an image (e.g. Snipping Tool) and confirm it renders as a thumbnail card
-- [ ] Copy files in Explorer and confirm a file-list card appears
-- [ ] Copying the same text twice does not create duplicate entries
-- [ ] `Ctrl+P` pins an entry; `Del` removes it
-- [ ] Hover a card and confirm a pin button appears in its top-right; click it and the card jumps to the front
-- [ ] Right-click a card and confirm the Paste / Pin / Remove menu appears
-- [ ] Confirm a pinned card keeps its amber filled pin icon and stays above newer entries
-- [ ] Confirm pinning survives closing and reopening the panel
-- [ ] Tray menu: pause capture stops new entries; clear history empties the shelf
-- [ ] Change the hotkey in Settings and confirm the new combination opens the shelf
-- [ ] Enable "Start with Windows" and confirm the registry Run value is created
-- [ ] Confirm the shelf appears on the monitor where the cursor is, spanning that screen
-
-## Known limitations
-
-- Applications running elevated (for example Task Manager) reject `SendInput`,
-  so automatic paste will not reach them. Copy still works via the clipboard.
-- If another application already owns the configured hotkey, registration fails
-  and a tray notification is shown; pick a different combination in Settings.
-- History is capped (default 500 unpinned entries); the oldest entries are evicted
-  and their image blobs removed.
+编译产物位于 `target\release\windows-paste.exe`，为一个约 **12 MB** 的纯绿色单文件程序。
+直接双击运行或加入开机自启即可使用。

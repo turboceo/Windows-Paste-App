@@ -1,0 +1,717 @@
+import { ScrollView, Button, LineEdit } from "std-widgets.slint";
+
+export struct SlintClipItem {
+    id: int,
+    category: string,         // "text" | "link" | "image" | "color" | "files"
+    category_name: string,    // "文本" | "链接" | "图像" | "颜色" | "文件"
+    category_glyph: string,
+    content: string,
+    preview: string,
+    meta_badge: string,
+    created_at: string,
+    pinned: bool,
+    selected: bool,
+    has_image: bool,
+    image_data: image,
+}
+
+export struct SlintClipRow {
+    items: [SlintClipItem],
+}
+
+// ----------------------------------------------------------------------------
+// Paste.app Style Single Card Component
+// ----------------------------------------------------------------------------
+component PasteCard inherits Rectangle {
+    in property <SlintClipItem> item;
+    in property <length> card_size: 240px;
+
+    callback selected();
+    callback double_clicked();
+    callback toggle_pin();
+    callback remove();
+
+    width: root.card_size;
+    height: root.card_size;
+    border-radius: 12px;
+    border-width: root.item.selected ? 3px : 1px;
+    border-color: root.item.selected ? #007aff :
+                  touch.has-hover ? #00000028 :
+                  root.item.category == "text" ? #2563eb1f :
+                  root.item.category == "link" ? #05966922 :
+                  root.item.category == "image" ? #ea580c1f :
+                  root.item.category == "color" ? #9333ea22 :
+                  root.item.category == "files" ? #d9770624 : #00000010;
+
+    // Paste.app signature pastel background colors
+    background: root.item.selected ? #ffffff :
+                root.item.category == "text" ? #f4f8fe :
+                root.item.category == "link" ? #edfcf6 :
+                root.item.category == "image" ? #f8fafc :
+                root.item.category == "color" ? #faf5ff :
+                root.item.category == "files" ? #fffef2 : #f8fafc;
+
+    animate border-color { duration: 120ms; easing: ease-out; }
+    animate background { duration: 120ms; easing: ease-out; }
+
+    touch := TouchArea {
+        clicked => { root.selected(); }
+        double-clicked => { root.double_clicked(); }
+    }
+
+    // Inner Content
+    VerticalLayout {
+        padding-top: 13px;
+        padding-bottom: 11px;
+        padding-left: 15px;
+        padding-right: 15px;
+        spacing: 9px;
+
+        // Header: Category Pill & Metadata Badge & Pin Button
+        HorizontalLayout {
+            alignment: space-between;
+            height: 28px;
+
+            // Type Pill
+            Rectangle {
+                border-radius: 999px;
+                background: root.item.category == "text" ? #2563eb18 :
+                            root.item.category == "link" ? #0596691c :
+                            root.item.category == "image" ? #ea580c18 :
+                            root.item.category == "color" ? #9333ea18 :
+                            root.item.category == "files" ? #d977061f : #00000010;
+                
+                HorizontalLayout {
+                    padding-left: 9px;
+                    padding-right: 10px;
+                    spacing: 6px;
+                    alignment: center;
+
+                    Text {
+                        text: root.item.category_glyph;
+                        font-family: "Segoe MDL2 Assets";
+                        font-size: 15px;
+                        color: root.item.category == "text" ? #2563eb :
+                               root.item.category == "link" ? #059669 :
+                               root.item.category == "image" ? #ea580c :
+                               root.item.category == "color" ? #9333ea :
+                               root.item.category == "files" ? #d97706 : #334155;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: root.item.category_name;
+                        font-size: 12px;
+                        font-weight: 600;
+                        color: root.item.category == "text" ? #2563eb :
+                               root.item.category == "link" ? #059669 :
+                               root.item.category == "image" ? #ea580c :
+                               root.item.category == "color" ? #9333ea :
+                               root.item.category == "files" ? #d97706 : #334155;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // Right header: Meta Badge and Pin Button
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: end;
+
+                if root.item.meta_badge != "": Text {
+                    text: root.item.meta_badge;
+                    font-size: 11.5px;
+                    font-weight: 500;
+                    color: #64748b;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                // Pin Button
+                Rectangle {
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 999px;
+                    background: root.item.pinned ? #f59e0b24 :
+                                pin_touch.has-hover ? #00000014 : transparent;
+                    opacity: (root.item.pinned || touch.has-hover) ? 1.0 : 0.0;
+                    animate opacity { duration: 120ms; }
+
+                    Text {
+                        text: root.item.pinned ? "\u{E840}" : "\u{E718}";
+                        font-family: "Segoe MDL2 Assets";
+                        font-size: 14px;
+                        color: root.item.pinned ? #d97706 : #94a3b8;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    pin_touch := TouchArea {
+                        clicked => { root.toggle_pin(); }
+                    }
+                }
+            }
+        }
+
+        // Body Content
+        Rectangle {
+            vertical-stretch: 1;
+
+            if root.item.has_image: Image {
+                source: root.item.image_data;
+                width: 100%;
+                height: 100%;
+                image-fit: contain;
+            }
+
+            if !root.item.has_image: Text {
+                text: root.item.preview;
+                font-size: 14px;
+                color: root.item.category == "link" ? #047857 : #1e293b;
+                wrap: word-wrap;
+                overflow: elide;
+                horizontal-alignment: left;
+                vertical-alignment: top;
+                width: 100%;
+                height: 100%;
+            }
+        }
+
+        // Footer: Timestamp and Delete Button
+        HorizontalLayout {
+            alignment: space-between;
+            height: 18px;
+
+            Text {
+                text: root.item.created_at;
+                font-size: 11px;
+                font-weight: 500;
+                color: #64748b;
+                vertical-alignment: center;
+            }
+
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                border-radius: 4px;
+                background: del_touch.has-hover ? #ef44441f : transparent;
+                opacity: touch.has-hover ? 1.0 : 0.0;
+                animate opacity { duration: 120ms; }
+
+                Text {
+                    text: "\u{E74D}";
+                    font-family: "Segoe MDL2 Assets";
+                    font-size: 13.5px;
+                    color: del_touch.has-hover ? #dc2626 : #94a3b8;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                del_touch := TouchArea {
+                    clicked => { root.remove(); }
+                }
+            }
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Custom Window Title Bar with Robust Vector Controls
+// ----------------------------------------------------------------------------
+component TitleBar inherits Rectangle {
+    in property <int> total_count: 0;
+    in property <int> filtered_count: 0;
+    in property <bool> is_maximized: false;
+
+    callback drag_move();
+    callback toggle_maximize();
+    callback minimize();
+    callback close();
+
+    height: 38px;
+    background: #ffffffb3;
+
+    // Bottom 1px divider
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: #0000000f;
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 0px;
+        spacing: 8px;
+
+        // Left Brand & Count Badge
+        HorizontalLayout {
+            alignment: start;
+            spacing: 8px;
+
+            Text {
+                text: "\u{E8A5}";
+                font-family: "Segoe MDL2 Assets";
+                font-size: 16px;
+                color: #2563eb;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: "剪贴板历史";
+                font-size: 12.5px;
+                font-weight: 600;
+                color: #475569;
+                vertical-alignment: center;
+            }
+
+            // Count Badge
+            Rectangle {
+                border-radius: 999px;
+                background: (root.filtered_count != root.total_count) ? #2563eb1f : #0000000f;
+                height: 18px;
+                y: (parent.height - self.height) / 2;
+
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    alignment: center;
+
+                    Text {
+                        text: (root.filtered_count != root.total_count) ?
+                              root.filtered_count + " / " + root.total_count :
+                              root.total_count + " 项";
+                        font-size: 11px;
+                        font-weight: 600;
+                        color: (root.filtered_count != root.total_count) ? #1d4ed8 : #475569;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // Middle Draggable Spacer (Drag window & double click to toggle maximize)
+        Rectangle {
+            horizontal-stretch: 1;
+
+            TouchArea {
+                pointer-event(event) => {
+                    if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                        root.drag_move();
+                    }
+                }
+                double-clicked => { root.toggle_maximize(); }
+            }
+        }
+
+        // Right Windows Control Buttons: Vector Drawn (100% immune to font issues)
+        HorizontalLayout {
+            spacing: 0px;
+
+            // Minimize Button: Crisp horizontal bar
+            Rectangle {
+                width: 44px;
+                height: 100%;
+                background: min_touch.has-hover ? #00000014 : transparent;
+
+                Rectangle {
+                    width: 10px;
+                    height: 1.2px;
+                    background: #475569;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+
+                min_touch := TouchArea {
+                    clicked => { root.minimize(); }
+                }
+            }
+
+            // Maximize / Restore Button: Crisp square outline or dual boxes
+            Rectangle {
+                width: 44px;
+                height: 100%;
+                background: max_touch.has-hover ? #00000014 : transparent;
+
+                if !root.is_maximized: Rectangle {
+                    width: 10px;
+                    height: 10px;
+                    border-width: 1.2px;
+                    border-color: #475569;
+                    background: transparent;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+
+                if root.is_maximized: Rectangle {
+                    width: 11px;
+                    height: 11px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+
+                    // Back box
+                    Rectangle {
+                        x: 2.5px;
+                        y: 0px;
+                        width: 8px;
+                        height: 8px;
+                        border-width: 1.2px;
+                        border-color: #475569;
+                    }
+                    // Front box
+                    Rectangle {
+                        x: 0px;
+                        y: 2.5px;
+                        width: 8px;
+                        height: 8px;
+                        border-width: 1.2px;
+                        border-color: #475569;
+                        background: #f6f8fb;
+                    }
+                }
+
+                max_touch := TouchArea {
+                    clicked => { root.toggle_maximize(); }
+                }
+            }
+
+            // Close Button: Native Windows crisp diagonal cross path
+            Rectangle {
+                width: 44px;
+                height: 100%;
+                background: close_touch.has-hover ? #e81123 : transparent;
+
+                Path {
+                    width: 10px;
+                    height: 10px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    stroke: close_touch.has-hover ? #ffffff : #475569;
+                    stroke-width: 1.2px;
+                    commands: "M 0 0 L 10 10 M 10 0 L 0 10";
+                }
+
+                close_touch := TouchArea {
+                    clicked => { root.close(); }
+                }
+            }
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Bottom ToolBar (Search + Shortcuts + Navigation)
+// ----------------------------------------------------------------------------
+component ToolBar inherits Rectangle {
+    in-out property <string> search_text: "";
+    in property <bool> can_prev: false;
+    in property <bool> can_next: false;
+
+    callback prev_clicked();
+    callback next_clicked();
+    callback search_edited(string);
+
+    height: 54px;
+    background: #ffffff80;
+
+    // Top 1px divider
+    Rectangle {
+        y: 0;
+        height: 1px;
+        background: #0000000f;
+    }
+
+    HorizontalLayout {
+        padding-left: 20px;
+        padding-right: 20px;
+        spacing: 16px;
+        alignment: space-between;
+
+        // Search Input Box
+        Rectangle {
+            width: 380px;
+            height: 38px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: search_input.has-focus ? #3b82f6 : #00000014;
+            background: #ffffffd9;
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 10px;
+                spacing: 8px;
+                alignment: start;
+
+                Text {
+                    text: "\u{E721}";
+                    font-family: "Segoe MDL2 Assets";
+                    font-size: 13px;
+                    color: #94a3b8;
+                    vertical-alignment: center;
+                }
+
+                search_input := TextInput {
+                    text <=> root.search_text;
+                    font-size: 13.5px;
+                    color: #0f172a;
+                    vertical-alignment: center;
+                    single-line: true;
+                    edited => { root.search_edited(self.text); }
+                }
+            }
+        }
+
+        // Shortcut Hints
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: center;
+
+            HorizontalLayout {
+                spacing: 4px;
+                Text { text: "Enter"; font-size: 11px; font-weight: 600; color: #334155; vertical-alignment: center; }
+                Text { text: "粘贴"; font-size: 11.5px; color: #64748b; vertical-alignment: center; }
+            }
+            HorizontalLayout {
+                spacing: 4px;
+                Text { text: "Ctrl+P"; font-size: 11px; font-weight: 600; color: #334155; vertical-alignment: center; }
+                Text { text: "置顶"; font-size: 11.5px; color: #64748b; vertical-alignment: center; }
+            }
+            HorizontalLayout {
+                spacing: 4px;
+                Text { text: "Del"; font-size: 11px; font-weight: 600; color: #334155; vertical-alignment: center; }
+                Text { text: "删除"; font-size: 11.5px; color: #64748b; vertical-alignment: center; }
+            }
+            HorizontalLayout {
+                spacing: 4px;
+                Text { text: "Esc"; font-size: 11px; font-weight: 600; color: #334155; vertical-alignment: center; }
+                Text { text: "关闭"; font-size: 11.5px; color: #64748b; vertical-alignment: center; }
+            }
+        }
+
+        // Navigation Buttons
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+
+            Rectangle {
+                width: 34px;
+                height: 34px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 999px;
+                border-width: 1px;
+                border-color: #00000014;
+                background: prev_touch.has-hover ? #ffffff : #ffffffbf;
+                opacity: root.can_prev ? 1.0 : 0.35;
+
+                Text {
+                    text: "\u{E76B}";
+                    font-family: "Segoe MDL2 Assets";
+                    font-size: 13px;
+                    color: #1e293b;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                prev_touch := TouchArea {
+                    enabled: root.can_prev;
+                    clicked => { root.prev_clicked(); }
+                }
+            }
+
+            Rectangle {
+                width: 34px;
+                height: 34px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 999px;
+                border-width: 1px;
+                border-color: #00000014;
+                background: next_touch.has-hover ? #ffffff : #ffffffbf;
+                opacity: root.can_next ? 1.0 : 0.35;
+
+                Text {
+                    text: "\u{E76C}";
+                    font-family: "Segoe MDL2 Assets";
+                    font-size: 13px;
+                    color: #1e293b;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                next_touch := TouchArea {
+                    enabled: root.can_next;
+                    clicked => { root.next_clicked(); }
+                }
+            }
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Main Window (Frameless, Square Corners, Modern Paste Layout)
+// ----------------------------------------------------------------------------
+export component MainWindow inherits Window {
+    title: "Windows Paste";
+    no-frame: true;
+    width: 1400px;
+    height: 620px;
+    background: #f6f8fb;
+
+    in property <[SlintClipRow]> rows: [];
+    in property <int> total_count: 0;
+    in property <int> filtered_count: 0;
+    in property <bool> is_maximized: false;
+    in-out property <string> search_text: "";
+    in property <bool> can_prev: false;
+    in property <bool> can_next: false;
+
+    in property <length> card_size: 240px;
+    in property <length> grid_gap: 16px;
+
+    callback card_selected(int);
+    callback card_double_clicked(int);
+    callback toggle_pin(int);
+    callback remove_item(int);
+
+    callback drag_move();
+    callback toggle_maximize();
+    callback minimize();
+    callback close_window();
+
+    callback prev_card();
+    callback next_card();
+    callback search_edited(string);
+    callback window_resized(length);
+
+    // 键盘全局导航与快捷操作回调
+    callback key_navigate(string);
+    callback key_paste_selected();
+    callback key_delete_selected();
+    callback key_toggle_pin_selected();
+
+    changed width => {
+        root.window_resized(self.width);
+    }
+
+    forward-focus: fs;
+
+    fs := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close_window();
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                root.key_paste_selected();
+                return accept;
+            }
+            if (event.text == Key.Delete) {
+                root.key_delete_selected();
+                return accept;
+            }
+            if (event.modifiers.control && (event.text == "p" || event.text == "P")) {
+                root.key_toggle_pin_selected();
+                return accept;
+            }
+            if (event.text == Key.LeftArrow) {
+                root.key_navigate("left");
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                root.key_navigate("right");
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                root.key_navigate("up");
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.key_navigate("down");
+                return accept;
+            }
+            return reject;
+        }
+
+        VerticalLayout {
+            padding: 0;
+            spacing: 0;
+
+            // 1. Top Custom Title Bar
+            TitleBar {
+                total_count: root.total_count;
+                filtered_count: root.filtered_count;
+                is_maximized: root.is_maximized;
+                drag_move => { root.drag_move(); }
+                toggle_maximize => { root.toggle_maximize(); }
+                minimize => { root.minimize(); }
+                close => { root.close_window(); }
+            }
+
+            // 2. Center Card Scroll View
+            Rectangle {
+                vertical-stretch: 1;
+
+                if root.rows.length == 0: Rectangle {
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 8px;
+
+                        Text {
+                            text: "\u{E8C5}";
+                            font-family: "Segoe MDL2 Assets";
+                            font-size: 38px;
+                            color: #94a3b8;
+                            horizontal-alignment: center;
+                        }
+                        Text {
+                            text: "剪贴板历史为空";
+                            font-size: 15px;
+                            font-weight: 600;
+                            color: #64748b;
+                            horizontal-alignment: center;
+                        }
+                        Text {
+                            text: "复制文本、图片或文件后将自动显示在这里";
+                            font-size: 12.5px;
+                            color: #94a3b8;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+
+                if root.rows.length > 0: ScrollView {
+                    VerticalLayout {
+                        padding-left: 20px;
+                        padding-right: 20px;
+                        padding-top: 18px;
+                        padding-bottom: 18px;
+                        spacing: root.grid_gap;
+                        alignment: start;
+
+                        for row in root.rows: HorizontalLayout {
+                            spacing: root.grid_gap;
+                            alignment: start;
+
+                            for item in row.items: PasteCard {
+                                item: item;
+                                card_size: root.card_size;
+                                selected => { root.card_selected(item.id); }
+                                double_clicked => { root.card_double_clicked(item.id); }
+                                toggle_pin => { root.toggle_pin(item.id); }
+                                remove => { root.remove_item(item.id); }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Bottom ToolBar
+            ToolBar {
+                search_text <=> root.search_text;
+                can_prev: root.can_prev;
+                can_next: root.can_next;
+                prev_clicked => { root.prev_card(); }
+                next_clicked => { root.next_card(); }
+                search_edited(s) => { root.search_edited(s); }
+            }
+        }
+    }
+}
