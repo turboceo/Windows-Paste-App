@@ -17,10 +17,7 @@ namespace WindowsPaste.Views;
 /// </summary>
 public partial class PopupHostWindow : Window
 {
-    private const double SlideDistance = 100;
-
     /// <summary>Panel occupies these fractions of the monitor's working area.</summary>
-    private const double WidthFraction = 0.9;
     private const double HeightFraction = 0.6;
 
     /// <summary>Virtual host that the bundled web assets are served from.</summary>
@@ -33,7 +30,6 @@ public partial class PopupHostWindow : Window
     private bool _allowDeactivateClose = true;
     private bool _webReady;
     private bool _pendingShow;
-    private double _restingTop;
 
     public PopupHostWindow(MainViewModel viewModel, string webRoot, string blobRoot)
     {
@@ -59,7 +55,7 @@ public partial class PopupHostWindow : Window
     /// <summary>Opens the popup on the monitor that owns the cursor.</summary>
     public void ShowForCurrentScreen()
     {
-        if (WindowState == WindowState.Minimized)
+        if (WindowState == WindowState.Minimized || WindowState == WindowState.Maximized)
         {
             WindowState = WindowState.Normal;
         }
@@ -68,17 +64,12 @@ public partial class PopupHostWindow : Window
         _viewModel.Reload(preserveSelection: false);
 
         PositionOnActiveScreen();
-
-        // Start slightly below the resting position, then drift up into place.
-        _restingTop = Top;
-        Opacity = 0;
-        Top = _restingTop + SlideDistance;
+        Opacity = 1;
 
         Show();
         ApplyWindowFrame();
         Activate();
 
-        // The web view may still be starting; it is told to focus once ready.
         if (_webReady)
         {
             FocusWebSearch();
@@ -87,8 +78,6 @@ public partial class PopupHostWindow : Window
         {
             _pendingShow = true;
         }
-
-        BeginSlideIn();
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -623,8 +612,9 @@ public partial class PopupHostWindow : Window
 
         var dpi = VisualTreeHelper.GetDpi(this);
 
-        // 90% wide and 60% tall, centred on the monitor under the cursor.
-        var widthPx = area.Width * WidthFraction;
+        // Comfortable centered width: 78% of working area, bounded nicely
+        var targetWidthPx = Math.Max(1000, Math.Min(1520, area.Width * 0.78));
+        var widthPx = Math.Min(targetWidthPx, area.Width * 0.95);
         var heightPx = area.Height * HeightFraction;
 
         Width = widthPx / dpi.DpiScaleX;
@@ -640,68 +630,8 @@ public partial class PopupHostWindow : Window
         WindowBlur.ApplySquareCorners(handle);
     }
 
-    private void BeginSlideIn()
-    {
-        var slide = new System.Windows.Media.Animation.DoubleAnimation
-        {
-            From = _restingTop + SlideDistance,
-            To = _restingTop,
-            Duration = TimeSpan.FromMilliseconds(240),
-            EasingFunction = new System.Windows.Media.Animation.CubicEase
-            {
-                EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut,
-            },
-            FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop,
-        };
-
-        slide.Completed += (_, _) => Top = _restingTop;
-        BeginAnimation(TopProperty, slide);
-
-        var fade = new System.Windows.Media.Animation.DoubleAnimation
-        {
-            From = 0,
-            To = 1,
-            Duration = TimeSpan.FromMilliseconds(170),
-            EasingFunction = new System.Windows.Media.Animation.CubicEase
-            {
-                EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut,
-            },
-            FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop,
-        };
-
-        fade.Completed += (_, _) => Opacity = 1;
-        BeginAnimation(OpacityProperty, fade);
-    }
-
     private void SlideOutAndHide()
     {
-        var slide = new System.Windows.Media.Animation.DoubleAnimation
-        {
-            From = Top,
-            To = _restingTop + SlideDistance,
-            Duration = TimeSpan.FromMilliseconds(160),
-            EasingFunction = new System.Windows.Media.Animation.CubicEase
-            {
-                EasingMode = System.Windows.Media.Animation.EasingMode.EaseIn,
-            },
-            FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop,
-        };
-
-        slide.Completed += (_, _) =>
-        {
-            Top = _restingTop;
-            Opacity = 1;
-            Hide();
-        };
-
-        BeginAnimation(TopProperty, slide);
-
-        BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation
-        {
-            From = 1,
-            To = 0,
-            Duration = TimeSpan.FromMilliseconds(130),
-            FillBehavior = System.Windows.Media.Animation.FillBehavior.Stop,
-        });
+        Hide();
     }
 }

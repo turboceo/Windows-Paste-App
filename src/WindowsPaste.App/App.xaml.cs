@@ -172,6 +172,9 @@ public partial class App : Application
         }
 
         _lastForegroundWindow = NativeMethods.GetForegroundWindow();
+
+        // Warm up WebView2 in the background so the first hotkey summon is instantaneous
+        EnsurePopupCreated();
     }
 
     private void OnHotkeyPressed(object? sender, EventArgs e)
@@ -226,18 +229,24 @@ public partial class App : Application
         // Remember who had focus so the paste lands in the right window.
         _lastForegroundWindow = NativeMethods.GetForegroundWindow();
 
-        if (_popup is null)
+        EnsurePopupCreated();
+        _popup?.ShowForCurrentScreen();
+    }
+
+    private void EnsurePopupCreated()
+    {
+        if (_popup is not null || _viewModel is null)
         {
-            // WebView2 startup is expensive, so the host is created once and
-            // reused for the life of the process rather than per open.
-            _popup = new PopupHostWindow(_viewModel, WebRootPath(), _blobRoot);
-            _popup.ItemActivated += OnItemActivated;
-            _popup.ItemDeleted += (_, item) => _viewModel?.Delete(item);
-            _popup.ItemPinToggled += (_, item) => _viewModel?.TogglePin(item);
-            _popup.Closed += (_, _) => _popup = null;
+            return;
         }
 
-        _popup.ShowForCurrentScreen();
+        // WebView2 startup is expensive, so the host is created once and
+        // reused for the life of the process rather than per open.
+        _popup = new PopupHostWindow(_viewModel, WebRootPath(), _blobRoot);
+        _popup.ItemActivated += OnItemActivated;
+        _popup.ItemDeleted += (_, item) => _viewModel?.Delete(item);
+        _popup.ItemPinToggled += (_, item) => _viewModel?.TogglePin(item);
+        _popup.Closed += (_, _) => _popup = null;
     }
 
     /// <summary>Folder containing the built Vue assets, copied next to the exe.</summary>
