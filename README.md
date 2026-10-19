@@ -1,14 +1,15 @@
-# Windows Paste (Rust + Slint 重构版)
+# Windows Paste (Tauri 2 + Vite + React)
 
-一个基于 **Rust + Slint UI** 的高性能 Windows 剪贴板历史管理器，深度还原 macOS 上著名应用 **[Paste](https://pasteapp.io/)** 的质感与体验。
+一个基于 **Tauri 2 + Vite + React 18 (TypeScript)** 的高性能 Windows 剪贴板历史管理器，深度还原 macOS 上著名应用 **[Paste](https://pasteapp.io/)** 的质感与交互体验。
+
 随时按下全局快捷键 `Ctrl + Shift + V`，在屏幕正中央瞬间唤出剪贴板面板，进行高速搜索、预览与一键粘贴。
 
 ---
 
 ## 核心特性
 
-- **极致性能与轻量**：纯 Rust 静态编译单一二进制文件，体积仅 **12 MB**，内存常驻仅约 **20 MB ~ 30 MB**，绝不依赖 WebView2、Node.js、Chromium 或 .NET 运行时，彻底杜绝浏览器进程白屏与 GPU 崩溃。
-- **瞬时呼出（< 20ms）**：原生毫秒级响应，定点居中呈现，绝无闪烁、位移拉伸与排版变形。
+- **现代轻量架构**：基于 Tauri 2 + 嵌入式 WebView2，利用原生 Chromium 渲染引擎与硬件加速，告别臃肿的 Electron，内存开销轻盈。
+- **纯原生丝滑滚动**：基于 React 虚拟列表（Virtual Windowing）与原生 CSS 平滑滚动，完美解决海量卡片滚动的性能与卡顿瓶颈。
 - **Paste.app 原生卡片美学**：
   - **智能格式识别与专属底色**：
     - 纯文本：柔和蓝白灰底板（`#F4F8FE`），右上角精确显示字符数；
@@ -17,17 +18,15 @@
     - 文件列表：温暖淡米黄底板（`#FFFEF2`），清晰展示包含图标的文件清单与总文件数；
     - 颜色代码：智能识别 `#RGB` / `#RRGGBB` / `rgb(...)`，中央呈现大色块色板。
   - **皇家蓝高对比聚焦外环**：选中时呈现 macOS 风格的 3px `#007aff` 亮蓝发光环与微浮升效果。
-- **视口卡片优化算法**：根据可用宽度动态自适应计算最佳列数（大卡片 236px），各行平滑均匀铺满。
-- **生产力标题栏与控制**：
-  - 左侧展示剪贴板图标 + 应用名 + **总数目数小胶囊 Badge**（实时显示总条数或筛选比例，如 `50 项` / `2 / 50 项`）；
-  - 中间支持鼠标直接拖拽窗口，支持**双击标题栏在最大化与居中还原之间快速切换**；
-  - 右侧提供 Windows 风格的最小化、最大化/还原、关闭控制按钮。
-- **交互与快捷键**：
+- **无边框与自适应视口**：
+  - 动态自适应计算最佳列数，各行平滑均匀铺满；
+  - 居中于当前鼠标光标所在显示器呼出，失焦自动收起（支持 Esc 一键关闭）；
+  - Windows 原生 Direct3D / DWM 纯正直角与亚克力背景模糊。
+- **生产力交互与快捷键**：
   - `Left` / `Right` / `Up` / `Down` 矩阵式键盘导航；
   - `Enter` 或双击卡片直接回写剪贴板并 `SendInput` 注入 `Ctrl + V` 到前台应用；
-  - `Ctrl + P` 或悬停点击图钉按钮置顶条目（置顶卡片常驻琥珀金徽章并排在最前）；
-  - `Del` 或悬停点击垃圾桶图标移除记录；
-  - `Esc` 一键关闭窗口。
+  - `Ctrl + P` 或悬停点击图钉按钮置顶条目；
+  - `Del` 或悬停点击垃圾桶图标移除记录。
 - **本地存储与隐私保护**：采用嵌入式 SQLite（`rusqlite bundled`），数据完全保存在本地 `%LOCALAPPDATA%\WindowsPaste\history.db`，图片缓存存为本地 PNG，绝不上云。
 
 ---
@@ -36,50 +35,93 @@
 
 | 模块 | 技术选型 | 说明 |
 | :--- | :--- | :--- |
-| **编程语言** | Rust 2021 (rustc 1.95+) | 极致内存安全、零成本抽象、无 GC |
-| **GUI 引擎** | Slint 1.9+ | 现代声明式轻量级原生 UI 引擎，DirectX/D3D 加速 |
+| **应用框架** | Tauri 2.12+ | 轻量级跨平台桌面框架，结合原生 Rust 与现代 Webview |
+| **前端视图** | Vite + React 18 + TypeScript | 虚拟滚动卡片网格，响应式状态机，低耦合 bridge 通信 |
 | **剪贴板监听** | Win32 `AddClipboardFormatListener` | 顶层隐藏窗口事件驱动，零 CPU 空转轮询 |
 | **全局快捷键** | Win32 `RegisterHotKey` | 独立工作线程监听 `Ctrl + Shift + V` (`WM_HOTKEY`) |
-| **模拟粘贴** | Win32 `SendInput` | 恢复前台焦点窗口并回放 `Ctrl + V` |
-| **本地存储** | SQLite 3 (via `rusqlite` bundled) | 静态编译进单一 exe，支持容量自动修剪与模糊索引 |
-| **图像编解码** | `image` (png) | 剪贴板 DIB 位图转码为紧凑 PNG 缩略图 |
+| **模拟粘贴** | Win32 `SendInput` | 恢复前台焦点窗口并回放 `Ctrl + V` 击键 |
+| **本地存储** | SQLite 3 (via `rusqlite` bundled) | 静态编译进本地二进制，支持容量自动修剪与模糊索引 |
+| **托盘常驻** | Win32 `Shell_NotifyIconW` | 原生系统托盘常驻与右键菜单 |
 
 ---
 
 ## 项目结构
 
 ```
-ui/
-  app.slint            Slint 声明式 UI 定义 (TitleBar, PasteCard, ToolBar, MainWindow)
-src/
-  main.rs              应用程序入口、Slint 状态机与 Win32 事件驱动调度
-  model.rs             剪贴板数据结构 (ClipboardItem, ClipboardItemType)
-  db.rs                本地 SQLite 数据层与容量修剪 (Database, AppPaths)
-  clipboard.rs         Win32 剪贴板监听器与多格式解析器 (Monitor, Sniffer)
-  hotkey.rs            Win32 全局热键后台线程管理 (HotkeyManager)
-  paste.rs             模拟剪贴板回写与 SendInput Ctrl+V 注入 (PasteService)
-Cargo.toml             Cargo 依赖与 Release 链接时优化 (LTO) 配置
-build.rs               编译期生成 Slint UI 原生 Rust 结构代码
+├── index.html                 # Webview 根挂载点
+├── package.json               # 前端依赖配置
+├── vite.config.ts             # Vite 构建打包配置
+├── tsconfig.json              # TypeScript 编译配置
+├── src/                       # React 前端工程
+│   ├── main.tsx               # 前端入口
+│   ├── App.tsx                # 主壳层与全局键盘事件处理
+│   ├── bridge.ts              # Tauri invoke 与 listen 桥接层
+│   ├── styles.css             # Paste.app 样式令牌与核心样式
+│   ├── types.ts               # 剪贴板条目与前后端协议类型定义
+│   └── components/            # UI 组件
+│       ├── TitleBar.tsx       # 无边框标题栏与窗口控制
+│       ├── CardGrid.tsx       # 虚拟滚动卡片网格
+│       ├── ClipCard.tsx       # 单张卡片组件
+│       └── ToolBar.tsx        # 底部搜索框与快捷键提示
+└── src-tauri/                 # Rust 原生后端工程
+    ├── Cargo.toml             # Rust 依赖声明
+    ├── tauri.conf.json        # Tauri 窗口与安全策略配置
+    ├── build.rs               # 构建配置
+    ├── icons/                 # 应用图标 (ico, png)
+    └── src/                   # Rust 源码
+        ├── lib.rs             # Tauri 应用入口调度与生命周期管理
+        ├── main.rs            # 可执行程序入口
+        ├── commands.rs        # Tauri #[command] 核心命令实现
+        ├── state.rs           # 全局状态与 DTO 序列化
+        ├── clipboard.rs       # Win32 剪贴板监听与格式嗅探
+        ├── db.rs              # SQLite 本地存储层
+        ├── hotkey.rs          # Win32 全局热键后台线程
+        ├── paste.rs           # 原生格式回写与 SendInput 模拟粘贴
+        ├── tray.rs            # 原生系统托盘
+        └── window_util.rs     # 窗口屏幕居中与 DWM 直角支持
 ```
 
 ---
 
 ## 构建与运行
 
-### 1. 运行调试版
+### 1. 运行前端开发预览
 ```powershell
-cargo run
+npm run dev
 ```
 
-### 2. 灌入测试种子数据并运行
+### 2. 运行桌面原生端（带测试数据）
 ```powershell
-# 灌入 50 条包含文本、文件、代码、置顶项的 Paste 风格样本数据
-cargo run -- --seed 50
+# 1. 编译前端静态产物
+npm run build
+
+# 2. 启动原生桌面应用（首次灌入 50 条测试数据并立即呼出展示）
+cargo run --manifest-path src-tauri/Cargo.toml -- --seed 50 --show
 ```
 
-### 3. 构建发布版（最优体积与速度）
+### 3. 构建单一发布可执行程序
 ```powershell
-cargo build --release
+npm run build
+cargo build --release --manifest-path src-tauri/Cargo.toml
 ```
-编译产物位于 `target\release\windows-paste.exe`，为一个约 **12 MB** 的纯绿色单文件程序。
+编译产物位于 `src-tauri\target\release\windows-paste.exe`。
 直接双击运行或加入开机自启即可使用。
+
+---
+
+## 自动化测试
+
+### 1. 一键端到端功能自检 (E2E Self-Test)
+无需复杂测试框架，应用内置了自动化测试套件，一键全自动跑完数据库、搜索过滤、焦点导航、置顶删除、剪贴板格式写入、窗口属性与分类 Tag 设置过滤 9 项核心功能体检：
+```powershell
+npm run test:selftest
+# 或直接调用
+cargo run --manifest-path src-tauri/Cargo.toml -- --selftest
+```
+
+### 2. 后端单元测试
+```powershell
+npm run test
+# 或直接调用
+cargo test --manifest-path src-tauri/Cargo.toml
+```

@@ -3,53 +3,19 @@
 # ==========================================
 
 # ------------------------------------------
-# 0. Rust & Cargo
+# 0. Rust & Tauri
 # ------------------------------------------
 target/
+src-tauri/target/
 Cargo.lock
+src-tauri/Cargo.lock
 **/*.rs.bk
 
 # ------------------------------------------
-# 1. .NET / C# / Build Outputs
-# ------------------------------------------
-[Bb]in/
-[Oo]bj/
-[Aa]pp_data/
-[Pp]ublish/
-publish/
-
-# NuGet & packages
-*.nupkg
-packages/
-project.lock.json
-project.fragment.lock.json
-artifacts/
-
-# Visual Studio & MSBuild temporary files
-.vs/
-*.user
-*.suo
-*.userosscache
-*.sln.docstates
-*.userprefs
-*.pidb
-*.vshost.exe
-*.vshost.exe.manifest
-*.vshost.exe.config
-
-# JetBrains Rider & ReSharper
-.idea/
-_ReSharper*/
-*.DotSettings.user
-
-# ------------------------------------------
-# 2. Node.js / Vite / Vue Frontend (web/)
+# 1. Node.js / Vite / React Frontend
 # ------------------------------------------
 node_modules/
 dist/
-web/dist/
-
-# Vite cache & TypeScript build info
 .vite/
 *.tsbuildinfo
 
