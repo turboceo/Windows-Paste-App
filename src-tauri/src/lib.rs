@@ -63,6 +63,8 @@ pub fn run() {
             // Native window polish: square corners, centered on the cursor monitor.
             if let Some(window) = app.get_webview_window("main") {
                 window_util::polish(&window);
+                // 显式设置窗口/任务栏图标（避免依赖资源缓存）
+                window_util::apply_window_icon(&window);
                 if show_on_start {
                     window_util::center_on_cursor(&window);
                     window.state::<BlurGuard>().0.store(true, Ordering::SeqCst);

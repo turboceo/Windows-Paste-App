@@ -12,6 +12,84 @@ fn hwnd_of(window: &WebviewWindow) -> Option<HWND> {
     window.hwnd().ok().map(|h| h.0 as HWND)
 }
 
+/// 显式把 exe 内嵌图标设置为窗口图标（任务栏 / Alt+Tab / 标题栏）。
+///
+/// 不依赖 Shell 的图标缓存判断：直接 `SendMessageW(WM_SETICON)`，
+/// 让系统重新读取图标句柄，因此新图标能立刻生效。
+pub fn apply_window_icon(window: &WebviewWindow) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        LoadImageW, SendMessageW, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_LOADFROMFILE, LR_SHARED,
+        WM_SETICON,
+    };
+
+    let Some(hwnd) = hwnd_of(window) else {
+        return;
+    };
+
+    // 优先使用磁盘上的 PNG/ICO，保证每次启动都重新读取，绕开资源缓存。
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("icons").join("icon.ico"));
+            candidates.push(dir.join("tray-icon.png"));
+        }
+    }
+    candidates.push(std::path::PathBuf::from("src-tauri/icons/icon.ico"));
+
+    let resolved = candidates
+        .into_iter()
+        .find(|p| p.exists())
+        .map(|p| p.to_string_lossy().to_string());
+
+    unsafe {
+        let mut big: isize = 0;
+        let mut small: isize = 0;
+
+        if let Some(path) = resolved {
+            let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+            let h = LoadImageW(
+                0 as _,
+                wide.as_ptr(),
+                IMAGE_ICON,
+                0,
+                0,
+                LR_LOADFROMFILE,
+            ) as isize;
+            if h != 0 {
+                big = h;
+                small = h;
+            }
+        }
+
+        if big == 0 {
+            // 退回 exe 内嵌资源
+            let hinstance = windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(
+                std::ptr::null(),
+            );
+            for id in [1usize, 2] {
+                let h = LoadImageW(
+                    hinstance,
+                    id as *const u16,
+                    IMAGE_ICON,
+                    0,
+                    0,
+                    LR_SHARED,
+                ) as isize;
+                if h != 0 {
+                    big = h;
+                    small = h;
+                    break;
+                }
+            }
+        }
+
+        if big != 0 {
+            SendMessageW(hwnd, WM_SETICON, ICON_BIG as usize, big);
+            SendMessageW(hwnd, WM_SETICON, ICON_SMALL as usize, small);
+        }
+    }
+}
+
 /// Applies the native window frame touches: square corners plus an acrylic
 /// backdrop so the panel reads like a floating Paste.app surface.
 pub fn polish(window: &WebviewWindow) {
