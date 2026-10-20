@@ -16,7 +16,7 @@ use windows_sys::Win32::System::DataExchange::{
     OpenClipboard, RemoveClipboardFormatListener,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+use windows_sys::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 use windows_sys::Win32::UI::Shell::DragQueryFileW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
@@ -24,7 +24,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_CLIPBOARDUPDATE, WM_DESTROY,
 };
 
-use crate::model::{ClipboardItem, ClipboardItemType};
+use crate::model::{clamp_files, clamp_text, ClipboardItem, ClipboardItemType};
 
 const CF_DIB: u32 = 8;
 const CF_UNICODETEXT: u32 = 13;
@@ -204,11 +204,12 @@ impl ClipboardSniffer {
             return None;
         }
 
+        // hash 永远基于完整原文：截断只影响落库的 payload，不影响"是不是同一次复制"。
         let hash = sha256_str(&format!("text:{}", trimmed));
         Some(ClipboardItem {
             id: 0,
             item_type: ClipboardItemType::Text,
-            content: trimmed.to_string(),
+            content: clamp_text(trimmed),
             blob_path: None,
             hash,
             created_at: Local::now(),
@@ -261,7 +262,7 @@ impl ClipboardSniffer {
         Some(ClipboardItem {
             id: 0,
             item_type: ClipboardItemType::Files,
-            content,
+            content: clamp_files(&content),
             blob_path: None,
             hash,
             created_at: Local::now(),
@@ -291,16 +292,25 @@ impl ClipboardSniffer {
                 return None;
             }
 
-            // Read BITMAPINFOHEADER to determine dimensions
-            let header_size = *(ptr as *const u32) as usize;
-            if header_size < 40 {
+            // 剪贴板数据的头部是别的进程写的，不能直接相信。
+            // 先用 GlobalSize 拿到真实分配长度，之后每一次读取都必须落在这个范围内。
+            let alloc_size = GlobalSize(hmem) as usize;
+
+            // 读取 BITMAPINFOHEADER 前先确认结构体本身在范围内
+            if alloc_size < 20 {
                 GlobalUnlock(hmem);
                 return None;
             }
 
-            let width = *(ptr.add(4) as *const i32);
-            let height = *(ptr.add(8) as *const i32);
-            let bpp = *(ptr.add(14) as *const u16);
+            let header_size = read_u32(ptr.add(0)) as usize;
+            if header_size < 40 || header_size > alloc_size {
+                GlobalUnlock(hmem);
+                return None;
+            }
+
+            let width = read_i32(ptr.add(4));
+            let height = read_i32(ptr.add(8));
+            let bpp = read_u16(ptr.add(14));
 
             if width <= 0 || height == 0 || (bpp != 24 && bpp != 32) {
                 GlobalUnlock(hmem);
@@ -310,10 +320,36 @@ impl ClipboardSniffer {
             let abs_height = height.unsigned_abs() as usize;
             let abs_width = width as usize;
             let row_stride = (abs_width * (bpp as usize) + 31) / 32 * 4;
-            let pixel_data_offset = header_size;
-            let total_pixels_size = row_stride * abs_height;
 
-            let pixel_ptr = ptr.add(pixel_data_offset);
+            // 关键校验：声明尺寸算出来的总长度必须真的装得下。
+            // 否则一个撒谎的头部就会让下面的 from_raw_parts 读到分配区之外。
+            let total_pixels_size = match row_stride.checked_mul(abs_height) {
+                Some(v) => v,
+                None => {
+                    GlobalUnlock(hmem);
+                    return None;
+                }
+            };
+            let needed = match header_size.checked_add(total_pixels_size) {
+                Some(v) => v,
+                None => {
+                    GlobalUnlock(hmem);
+                    return None;
+                }
+            };
+            if needed > alloc_size {
+                GlobalUnlock(hmem);
+                return None;
+            }
+
+            // 再挡一次离谱的尺寸，避免为一条恶意数据分配几个 GB
+            const MAX_PIXELS: usize = 64 * 1024 * 1024; // 64 MPix ≈ 8192x8192
+            if abs_width * abs_height > MAX_PIXELS {
+                GlobalUnlock(hmem);
+                return None;
+            }
+
+            let pixel_ptr = ptr.add(header_size);
             let pixel_slice = std::slice::from_raw_parts(pixel_ptr, total_pixels_size);
 
             let mut img_buf: ImageBuffer<Rgba<u8>, Vec<u8>> =
@@ -378,6 +414,21 @@ impl ClipboardSniffer {
             tag: None,
         })
     }
+}
+
+/// 从 DIB 头部按字段偏移读取，避免依赖结构体对齐。
+///
+/// 调用方必须先用 `GlobalSize` 校验过 `offset + size` 在分配范围内。
+unsafe fn read_u32(ptr: *const u8) -> u32 {
+    u32::from_le(std::ptr::read_unaligned(ptr as *const u32))
+}
+
+unsafe fn read_i32(ptr: *const u8) -> i32 {
+    i32::from_le(std::ptr::read_unaligned(ptr as *const i32))
+}
+
+unsafe fn read_u16(ptr: *const u8) -> u16 {
+    u16::from_le(std::ptr::read_unaligned(ptr as *const u16))
 }
 
 pub fn wide_str(s: &str) -> Vec<u16> {

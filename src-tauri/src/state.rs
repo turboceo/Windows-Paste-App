@@ -1,12 +1,11 @@
 //! Shared application state and DTO conversion for the Tauri command layer.
 
-use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
 use crate::db::{AppPaths, Database};
-use crate::model::{ClipboardItem, ClipboardItemType};
+use crate::model::{ClipboardItem, ClipboardItemType, MAX_CONTENT_CHARS};
 
 /// Maximum number of unpinned entries kept in history.
 pub const HISTORY_CAPACITY: usize = 500;
@@ -28,7 +27,8 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(paths: AppPaths) -> Self {
-        let db = Database::open(&paths.db, HISTORY_CAPACITY).expect("open sqlite database");
+        let db = Database::open_with_blobs(&paths.db, HISTORY_CAPACITY, paths.blobs.clone())
+            .expect("open sqlite database");
         let total_count = db.get_total_count().unwrap_or(0);
         let all_tags = db.get_all_tags().unwrap_or_default();
         let items = db.get_all().unwrap_or_default();
@@ -79,24 +79,25 @@ pub struct ClipItemDto {
     pub r#type: String,
     pub content: String,
     pub preview: String,
+    /// 图片条目的 blob 文件名（不是完整路径）。前端用 `convertFileSrc`
+    /// 走 asset 协议直接加载，避免把图片塞进 IPC payload。
     pub image_url: Option<String>,
     pub created_at_label: String,
     pub pinned: bool,
     pub tag: Option<String>,
+    /// 原文长度超过上限、落库时被截断过。
+    pub truncated: bool,
 }
 
 impl ClipItemDto {
-    pub fn from_item(item: &ClipboardItem, blobs_dir: &PathBuf) -> Self {
+    /// 构造推给前端的 DTO。
+    ///
+    /// `image_url` 只给**文件名**，由前端用 `convertFileSrc` 拼成 asset URL。
+    /// 之前这里每次推送都读盘 + base64，一张几 MB 的截图会在每次搜索、
+    /// 每次置顶时被重新编码一遍——IPC 体积和内存峰值都被放大几十倍。
+    pub fn from_item(item: &ClipboardItem) -> Self {
         let image_url = match item.item_type {
-            ClipboardItemType::Image => item
-                .blob_path
-                .as_ref()
-                .and_then(|name| std::fs::read(blobs_dir.join(name)).ok())
-                .map(|bytes| {
-                    use base64::Engine;
-                    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-                    format!("data:image/png;base64,{}", encoded)
-                }),
+            ClipboardItemType::Image => item.blob_path.clone(),
             _ => None,
         };
 
@@ -109,6 +110,8 @@ impl ClipItemDto {
             created_at_label: item.created_at_label(),
             pinned: item.pinned,
             tag: item.tag.clone(),
+            // 截断阈值是入库时的字符上限，到顶即认为被裁剪过
+            truncated: item.content.chars().count() >= MAX_CONTENT_CHARS,
         }
     }
 }

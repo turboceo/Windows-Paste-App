@@ -15,6 +15,8 @@ const OVERSCAN_ROWS = 2 // Render buffer rows above and below the visible area
 
 interface CardGridProps {
   items: ClipboardItem[]
+  /** blob 目录绝对路径；图片卡片用它拼 asset URL */
+  blobsRoot: string | null
   selectedId: number | null
   onSelect: (item: ClipboardItem) => void
   onPaste: (item: ClipboardItem) => void
@@ -31,6 +33,7 @@ interface CardGridProps {
  */
 export default function CardGrid({
   items,
+  blobsRoot,
   selectedId,
   onSelect,
   onPaste,
@@ -180,6 +183,7 @@ export default function CardGrid({
             <ClipCard
               key={item.id}
               item={item}
+              blobsRoot={blobsRoot}
               selected={item.id === selectedId}
               onSelect={onSelect}
               onPaste={onPaste}

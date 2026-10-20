@@ -23,31 +23,34 @@ use crate::clipboard::wide_str;
 
 const WM_TRAYICON: u32 = WM_APP + 101;
 const ID_TRAY_SHOW: u32 = 1001;
-const ID_TRAY_CLEAR: u32 = 1002;
 const ID_TRAY_EXIT: u32 = 1003;
 
 type TrayCallback = Arc<dyn Fn() + Send + Sync + 'static>;
 
 static TRAY_SHOW: Mutex<Option<TrayCallback>> = Mutex::new(None);
-static TRAY_CLEAR: Mutex<Option<TrayCallback>> = Mutex::new(None);
 static TRAY_EXIT: Mutex<Option<TrayCallback>> = Mutex::new(None);
+
+/// 托盘菜单的动作集合。
+///
+/// 托盘只保留"唤出面板"和"退出"两件事——导入、导出、清空历史都是
+/// destructive / 低频操作，放在界面里更合适：那里有确认对话框、能显示进度、
+/// 也不会因为右键点错而误清一整年的记录。
+pub struct TrayActions<FShow, FExit> {
+    pub on_show: FShow,
+    pub on_exit: FExit,
+}
 
 pub struct TrayIcon;
 
 impl TrayIcon {
     /// 启动托盘后台消息循环线程
-    pub fn start<FShow, FClear, FExit>(
-        on_show: FShow,
-        on_clear: FClear,
-        on_exit: FExit,
-    ) where
+    pub fn start<FShow, FExit>(actions: TrayActions<FShow, FExit>)
+    where
         FShow: Fn() + Send + Sync + 'static,
-        FClear: Fn() + Send + Sync + 'static,
         FExit: Fn() + Send + Sync + 'static,
     {
-        if let Ok(mut l) = TRAY_SHOW.lock() { *l = Some(Arc::new(on_show)); }
-        if let Ok(mut l) = TRAY_CLEAR.lock() { *l = Some(Arc::new(on_clear)); }
-        if let Ok(mut l) = TRAY_EXIT.lock() { *l = Some(Arc::new(on_exit)); }
+        if let Ok(mut l) = TRAY_SHOW.lock() { *l = Some(Arc::new(actions.on_show)); }
+        if let Ok(mut l) = TRAY_EXIT.lock() { *l = Some(Arc::new(actions.on_exit)); }
 
         thread::spawn(move || unsafe {
             let class_name = wide_str("WindowsPaste_TrayWindow");
@@ -270,11 +273,9 @@ unsafe extern "system" fn tray_wnd_proc(
 
                 let hmenu = CreatePopupMenu();
                 let m_show = wide_str("唤起剪贴板 (&S)\tCtrl+Shift+V");
-                let m_clear = wide_str("清空历史记录 (&C)");
                 let m_exit = wide_str("退出 Windows Paste (&X)");
 
                 AppendMenuW(hmenu, MF_STRING, ID_TRAY_SHOW as usize, m_show.as_ptr());
-                AppendMenuW(hmenu, MF_STRING, ID_TRAY_CLEAR as usize, m_clear.as_ptr());
                 AppendMenuW(hmenu, MF_SEPARATOR, 0, std::ptr::null());
                 AppendMenuW(hmenu, MF_STRING, ID_TRAY_EXIT as usize, m_exit.as_ptr());
 
@@ -294,13 +295,6 @@ unsafe extern "system" fn tray_wnd_proc(
                 match cmd {
                     ID_TRAY_SHOW => {
                         if let Ok(lock) = TRAY_SHOW.lock() {
-                            if let Some(ref cb) = *lock {
-                                cb();
-                            }
-                        }
-                    }
-                    ID_TRAY_CLEAR => {
-                        if let Ok(lock) = TRAY_CLEAR.lock() {
                             if let Some(ref cb) = *lock {
                                 cb();
                             }

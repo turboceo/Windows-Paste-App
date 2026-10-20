@@ -27,11 +27,24 @@ export function send(request: HostRequest): void {
   })
 }
 
-/** Subscribes to host pushes; returns an unsubscribe function. */
-export function onPush(handler: (message: HostPush) => void): () => void {
+/**
+ * Subscribes to host pushes.
+ *
+ * `onReady` 在监听器**真正注册完成之后**才调用。
+ *
+ * 这一点很关键：`listen()` 是异步的，如果调用方在 `onPush()` 之后立刻
+ * `send({type:'ready'})`，后端可能在监听器建立之前就把整批初始状态推出去，
+ * 这些消息会被静默丢弃——表现就是图片永不显示（`blobsRoot` 始终为 null）、
+ * 列表空白。所以把"可以发 ready 了"这件事交给 here 回调。
+ */
+export function onPush(
+  handler: (message: HostPush) => void,
+  onReady?: () => void,
+): () => void {
   if (!isTauri()) {
     console.debug('[bridge] running in browser, seeding dev data')
     seedDevData(handler)
+    onReady?.()
     return () => {}
   }
 
@@ -44,9 +57,11 @@ export function onPush(handler: (message: HostPush) => void): () => void {
     .then((fn) => {
       if (cancelled) {
         fn()
-      } else {
-        unlisten = fn
+        return
       }
+      unlisten = fn
+      // 监听器就绪后才通知前端可以请求初始数据
+      onReady?.()
     })
     .catch((error) => {
       console.error('[bridge] failed to listen to host-push:', error)
@@ -83,6 +98,7 @@ function seedDevData(handler: (message: HostPush) => void): void {
       createdAtLabel: '2026-10-16 12:00',
       pinned: index === 2 || index === 15,
       tag: index === 2 ? '代码' : index === 5 ? '常用' : null,
+      truncated: false,
     }
   }).reverse()
 

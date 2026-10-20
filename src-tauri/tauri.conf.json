@@ -22,7 +22,7 @@
         "visible": false,
         "center": true,
         "shadow": false,
-        "devtools": true
+        "devtools": false
       }
     ],
     "security": {
@@ -36,8 +36,27 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis", "msi"],
     "icon": ["icons/icon.ico"],
-    "resources": ["tray-icon.png"]
+    "resources": ["tray-icon.png"],
+    "publisher": "Pyzl",
+    "shortDescription": "Paste.app 风格的 Windows 剪贴板历史管理器",
+    "longDescription": "Windows Paste 是一款深度还原 macOS Paste 体验的高性能 Windows 剪贴板历史管理器。按 Ctrl+Shift+V 随时呼出面板，支持格式智能识别、分类 Tag、键盘矩阵导航与一键原生粘贴。",
+    "copyright": "Copyright © 2026 Pyzl",
+    "category": "Utility",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false
+      },
+      "wix": {
+        "language": ["zh-CN", "en-US"]
+      }
+    }
   }
 }

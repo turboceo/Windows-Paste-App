@@ -9,13 +9,29 @@ export interface ClipboardItem {
   content: string
   /** Display-ready preview line. */
   preview: string
-  /** Data URL for image entries, otherwise null. */
+  /**
+   * 图片条目的 blob 文件名（如 `abc123….png`），不是 URL。
+   * 由 `assets.ts` 的 `blobUrl()` 拼成 asset 协议地址后交给 `<img>`。
+   */
   imageUrl: string | null
   /** Preformatted timestamp for the card footer. */
   createdAtLabel: string
   pinned: boolean
   /** Optional custom category tag (e.g. "代码", "工作", "常用"). */
   tag: string | null
+  /** 原文超过上限、入库时被截断过。 */
+  truncated: boolean
+}
+
+/** 导入预检结果：确认前先告诉用户会发生什么。 */
+export interface ImportPreview {
+  total: number
+  /** 已存在且不会变化的数量 */
+  existing: number
+  /** 会被新增的数量 */
+  fresh: number
+  formatVersion: number
+  exportedAt: string
 }
 
 export interface SelectionState {
@@ -36,6 +52,11 @@ export type HostRequest =
   | { type: 'setTag'; itemId: number; tag: string | null }
   | { type: 'filterTag'; tag: string | null }
   | { type: 'columns'; columns: number }
+  | { type: 'export'; path?: string | null }
+  | { type: 'previewImport'; path: string }
+  | { type: 'import'; path: string }
+  | { type: 'pickImportFile' }
+  | { type: 'clearAll' }
   | { type: 'dragMove' }
   | { type: 'minimize' }
   | { type: 'maximize' }
@@ -57,3 +78,13 @@ export type HostPush =
   | { type: 'hotkey'; label: string }
   | { type: 'windowState'; isMaximized: boolean }
   | { type: 'toast'; message: string }
+  | {
+      type: 'importPreview'
+      path: string
+      preview?: ImportPreview
+      error?: string
+    }
+  | { type: 'paths'; blobsRoot: string }
+  /** 面板被唤出：宿主已清空搜索词与分类筛选，前端同步归零。 */
+  | { type: 'reset' }
+  | { type: 'hotkeyUnavailable'; label: string; message: string }

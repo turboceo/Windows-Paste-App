@@ -12,14 +12,16 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
+# 托盘是 Windows 原生实现的（tray.rs），不需要 tauri 的 tray-icon feature
+tauri = { version = "2", features = ["protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 sha2 = "0.10"
 image = { version = "0.25", default-features = false, features = ["png"] }
 chrono = "0.4"
-directories = "5.0"
+# 路径是手拼 LOCALAPPDATA，没有用到 directories
+# directories = "5.0"
 base64 = "0.22"
 window-vibrancy = "0.6"
 
@@ -29,9 +31,16 @@ features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Input_KeyboardAndMouse",
+    # 导入时的原生"打开文件"对话框（filedialog.rs）
+    "Win32_UI_Controls_Dialogs",
     "Win32_System_DataExchange",
     "Win32_System_Memory",
     "Win32_System_LibraryLoader",
+    # 单实例保护（single_instance.rs）需要 CreateMutexW / CreateEventW / WaitForSingleObject
+    "Win32_System_Threading",
+    # windows-sys 会按依赖裁剪：CreateMutexW / CreateEventW 的参数里有
+    # *const SECURITY_ATTRIBUTES，不启用 Win32_Security 这两个函数根本不会生成
+    "Win32_Security",
     "Win32_UI_Shell",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",

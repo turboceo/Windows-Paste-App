@@ -1,8 +1,11 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { blobUrl } from '../assets'
 import type { ClipboardItem } from '../types'
 
 interface ClipCardProps {
   item: ClipboardItem
+  /** blob 目录绝对路径，由宿主下发；为空时图片退化成占位 */
+  blobsRoot: string | null
   selected: boolean
   onSelect: (item: ClipboardItem) => void
   onPaste: (item: ClipboardItem) => void
@@ -14,6 +17,7 @@ interface ClipCardProps {
 /** One history card, styled after Paste.app. */
 export default function ClipCard({
   item,
+  blobsRoot,
   selected,
   onSelect,
   onPaste,
@@ -52,6 +56,20 @@ export default function ClipCard({
       .filter(Boolean)
       .map((fullPath) => ({ name: fullPath.split(/[\\/]/).pop() || fullPath, fullPath }))
   }, [item.type, item.content])
+
+  // 后端只给 blob 文件名，这里拼成 asset URL；拿不到就退回文字预览
+  const imageSrc = useMemo(
+    () => (item.type === 'Image' ? blobUrl(blobsRoot, item.imageUrl) : null),
+    [item.type, item.imageUrl, blobsRoot],
+  )
+
+  // 加载失败后不要一直重试：记住这张卡已经失败过，直接显示占位
+  const [imageFailed, setImageFailed] = useState(false)
+
+  // 路径变化时重置失败状态（例如 blobsRoot 晚到）
+  useEffect(() => {
+    setImageFailed(false)
+  }, [imageSrc])
 
   const semanticCategory = useMemo(() => {
     if (item.type === 'Image') return 'image'
@@ -105,7 +123,9 @@ export default function ClipCard({
       }
       default: {
         const len = item.content.length
-        return len > 0 ? `${len} 字符` : ''
+        if (len === 0) return ''
+        // 被截断过的内容加个后缀，避免用户以为复制的东西只有这么点
+        return item.truncated ? `${len}+ 字符` : `${len} 字符`
       }
     }
   }, [semanticCategory, urlDomain, fileList.length, item.content])
@@ -151,9 +171,22 @@ export default function ClipCard({
         </header>
 
         <div className="card-body">
-          {item.imageUrl ? (
+          {item.type === 'Image' ? (
             <div className="image-stage">
-              <img src={item.imageUrl} alt="" className="hero-image" />
+              {imageSrc && !imageFailed ? (
+                <img
+                  src={imageSrc}
+                  alt=""
+                  className="hero-image"
+                  loading="lazy"
+                  decoding="async"
+                  // asset 协议被 scope 拒绝、或 blob 文件已被删掉时，
+                  // <img> 只会静默显示为空白。这里兜底成占位，至少能看出"这是一张图"。
+                  onError={() => setImageFailed(true)}
+                />
+              ) : (
+                <span className="image-fallback">{item.preview || '图像'}</span>
+              )}
             </div>
           ) : isColorCode ? (
             <div className="color-stage">

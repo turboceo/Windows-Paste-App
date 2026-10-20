@@ -1,0 +1,1554 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Windows Paste · 设计亮点分析</title>
+<style>
+:root{
+  color-scheme: light;
+  --paper:#F7F9FC;
+  --surface:#FFFFFF;
+  --ink:#101A26;
+  --ink-2:#46566B;
+  --ink-3:#7D8A9B;
+  --rule:#DEE5EF;
+  --rule-strong:#BECADC;
+  --blue:#0B5CE8;
+  --blue-tint:#EDF3FF;
+  --amber:#9A5B08;
+  --amber-tint:#FDF6EA;
+  --green:#046B52;
+  --green-tint:#EBFAF4;
+  --code-bg:#0E1726;
+  --code-fg:#C8D6E6;
+  --code-dim:#6B8099;
+  --code-key:#84B4FF;
+
+  --c-text:#F4F8FE;
+  --c-link:#EDFCF6;
+  --c-image:#F8FAFC;
+  --c-color:#FAF5FF;
+  --c-files:#FFFEF2;
+  --c-ring:#007AFF;
+
+  --sans:"Microsoft YaHei UI","PingFang SC","Hiragino Sans GB","Source Han Sans SC","Noto Sans SC",system-ui,sans-serif;
+  --mono:"Cascadia Mono",Consolas,"SFMono-Regular","Roboto Mono",monospace;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:16.5px;
+  line-height:1.85;
+  -webkit-font-smoothing:antialiased;
+}
+::selection{background:#CFE0FF;color:#06121F}
+a{color:var(--blue);text-decoration-thickness:1px;text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+
+/* ---------- top bar ---------- */
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;gap:24px;
+  padding:14px 40px;
+  border-bottom:1px solid var(--rule);
+  font-family:var(--mono);font-size:11.5px;color:var(--ink-3);
+  flex-wrap:wrap;
+}
+.topbar .id{color:var(--ink);letter-spacing:.01em}
+.topbar .id b{font-weight:600}
+.topbar .meta{display:flex;gap:0;flex-wrap:wrap;align-items:center}
+.topbar .meta span{padding:0 14px;border-left:1px solid var(--rule)}
+.topbar .meta span:first-child{padding-left:0;border-left:0}
+.topbar .meta span:last-child{padding-right:0}
+
+.wrap{max-width:1180px;margin:0 auto;padding:0 40px 120px}
+
+/* ---------- hero ---------- */
+.hero{padding:76px 0 0}
+h1{
+  margin:0;
+  font-size:clamp(34px,4.9vw,58px);
+  line-height:1.18;
+  letter-spacing:-.035em;
+  font-weight:700;
+  max-width:17em;
+}
+h1 em{font-style:normal;color:var(--blue)}
+.lede{
+  margin:26px 0 0;
+  max-width:60ch;
+  font-size:18px;
+  line-height:1.92;
+  color:var(--ink-2);
+}
+.lede strong{color:var(--ink);font-weight:600}
+
+.stats{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+  margin:46px 0 0;
+  border-top:1px solid var(--rule-strong);
+  border-bottom:1px solid var(--rule-strong);
+}
+.stats div{
+  padding:18px 20px 16px;
+  min-width:0;
+}
+.stats div:first-child{padding-left:0}
+.stats div + div{border-left:1px solid var(--rule)}
+.stats b{
+  display:block;font-family:var(--mono);font-size:26px;font-weight:600;
+  letter-spacing:-.03em;line-height:1.2;color:var(--ink);
+}
+.stats span{display:block;font-size:12.5px;color:var(--ink-3);margin-top:4px;letter-spacing:.01em}
+
+/* ---------- swatches ---------- */
+.swatches{margin-top:26px;display:flex;align-items:center;gap:10px 12px;flex-wrap:wrap}
+.swatches .lbl{flex:0 0 auto;font-family:var(--mono);font-size:11px;color:var(--ink-3);margin-right:2px}
+.sw{
+  display:inline-flex;align-items:center;gap:7px;
+  font-family:var(--mono);font-size:10.5px;color:var(--ink-2);
+  border:1px solid var(--rule);background:#fff;border-radius:3px;
+  padding:4px 8px 4px 5px;
+}
+.sw i{width:14px;height:14px;border-radius:2px;border:1px solid rgba(16,26,38,.13);display:block}
+.sw.ring i{border-color:var(--c-ring);box-shadow:inset 0 0 0 2px #fff}
+
+/* ---------- relay / timeline ---------- */
+.relay-wrap{margin-top:64px}
+.relay-head{
+  display:flex;align-items:baseline;justify-content:space-between;gap:20px;
+  font-family:var(--mono);font-size:11px;color:var(--ink-3);
+  padding-bottom:10px;
+}
+.relay-head b{color:var(--ink-2);font-weight:500}
+.relay{
+  list-style:none;margin:0;padding:0;
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+}
+.relay li{
+  position:relative;
+  padding:22px 28px 20px 0;
+  min-width:0;
+  border-top:1px solid var(--rule-strong);
+}
+.relay li::before{
+  content:"";position:absolute;top:-4.5px;left:0;
+  width:8px;height:8px;border-radius:50%;
+  background:var(--surface);border:1.5px solid var(--blue);
+}
+.relay li.done::before{background:var(--blue)}
+.relay li:last-child{flex:1 1 138px}
+.relay .t{display:block;font-family:var(--mono);font-size:10.5px;color:var(--ink-3);letter-spacing:.02em}
+.relay .ev{display:block;font-size:13.5px;font-weight:600;line-height:1.45;margin-top:5px;letter-spacing:-.01em}
+.relay .rnote{display:block;font-size:11px;color:var(--ink-3);line-height:1.6;margin-top:5px;word-break:break-word}
+
+/* ---------- architecture ---------- */
+.arch{margin-top:76px}
+.arch figcaption{
+  font-family:var(--mono);font-size:11px;color:var(--ink-3);
+  padding-bottom:12px;display:flex;justify-content:space-between;gap:16px;
+}
+.arch svg{width:100%;height:auto;display:block;background:var(--surface);border:1px solid var(--rule)}
+
+/* ---------- sections ---------- */
+.sec{
+  display:grid;
+  grid-template-columns:188px minmax(0,1fr);
+  gap:48px;
+  border-top:1px solid var(--rule-strong);
+  margin-top:84px;
+  padding-top:26px;
+}
+.gutter{
+  position:sticky;top:24px;align-self:start;
+  font-family:var(--mono);font-size:11px;line-height:1.7;color:var(--ink-3);
+}
+.gutter .num{
+  display:block;font-size:11px;letter-spacing:.14em;color:var(--ink-3);margin-bottom:10px;
+}
+.gutter .path{display:block;color:var(--ink-2);word-break:break-all}
+.gutter .path + .path{margin-top:3px;color:var(--ink-3)}
+
+.body{min-width:0}
+.body > *:first-child{margin-top:0}
+td code:not(pre code){white-space:normal;word-break:break-word}
+h2{
+  margin:0 0 22px;
+  font-size:clamp(25px,2.9vw,33px);
+  line-height:1.3;
+  letter-spacing:-.028em;
+  font-weight:700;
+}
+h3{
+  margin:44px 0 14px;
+  font-size:19px;
+  line-height:1.5;
+  letter-spacing:-.015em;
+  font-weight:700;
+}
+h3 .idx{
+  font-family:var(--mono);font-size:11.5px;font-weight:500;color:var(--blue);
+  margin-right:10px;letter-spacing:.02em;
+}
+p{margin:0 0 18px;max-width:66ch}
+p.wide{max-width:none}
+.lead{font-size:17.5px;color:var(--ink-2);max-width:64ch}
+
+/* inline code */
+code:not(pre code){
+  font-family:var(--mono);font-size:.855em;
+  background:#EDF1F7;border:1px solid #E1E8F1;border-radius:3px;
+  padding:1px 5px;color:#233449;white-space:nowrap;
+}
+
+/* ---------- code figure ---------- */
+figure.code{
+  margin:26px 0 28px;
+  background:var(--code-bg);
+  border-radius:4px;
+  overflow:hidden;
+  border:1px solid #1B2739;
+}
+figure.code figcaption{
+  display:flex;justify-content:space-between;gap:16px;
+  padding:9px 16px;
+  font-family:var(--mono);font-size:11px;
+  color:#8CA0BA;background:#131E2F;border-bottom:1px solid #1E2B3F;
+}
+figure.code figcaption .ln{color:#5F7590}
+figure.code pre{
+  margin:0;padding:16px 18px 18px;
+  overflow-x:auto;
+  font-family:var(--mono);font-size:12.7px;line-height:1.78;
+  color:var(--code-fg);
+  tab-size:2;
+}
+figure.code .cm{color:var(--code-dim)}
+figure.code .kw{color:var(--code-key)}
+figure.code .hl{background:rgba(132,180,255,.12);display:block;margin:0 -18px;padding:0 18px}
+figure.code .del{color:#F09A9A}
+figure.code .add{color:#7BD9AE}
+
+/* ---------- callouts ---------- */
+.note{
+  margin:26px 0;padding:16px 20px 15px;
+  border-left:2px solid var(--blue);
+  background:var(--blue-tint);
+  border-radius:0 3px 3px 0;
+  font-size:14.8px;line-height:1.8;color:#1B2C45;
+}
+.note.warn{border-left-color:#C98A24;background:var(--amber-tint);color:#4A3618}
+.note.ok{border-left-color:#0E9E77;background:var(--green-tint);color:#0C3D31}
+.note b{font-weight:700}
+.note > span.tag{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;
+  display:block;margin-bottom:6px;color:var(--blue);opacity:.8;
+}
+.note.warn > span.tag{color:var(--amber)}
+.note.ok > span.tag{color:var(--green)}
+
+/* ---------- tables ---------- */
+.tablewrap{margin:24px 0 10px;overflow-x:auto}
+table{
+  width:100%;border-collapse:collapse;
+  font-size:14px;line-height:1.65;
+}
+caption{
+  text-align:left;font-family:var(--mono);font-size:11px;color:var(--ink-3);
+  padding-bottom:8px;
+}
+th{
+  text-align:left;font-weight:600;font-size:11.5px;letter-spacing:.04em;
+  color:var(--ink-3);
+  border-bottom:1px solid var(--rule-strong);
+  padding:0 16px 8px 0;
+  white-space:nowrap;
+}
+td{
+  vertical-align:top;
+  padding:11px 16px 11px 0;
+  border-bottom:1px solid var(--rule);
+  color:var(--ink-2);
+}
+td:first-child{color:var(--ink);font-weight:600;width:20%}
+td.loc{
+  font-family:var(--mono);font-size:11.5px;color:var(--ink-3);
+  white-space:nowrap;width:22%;
+}
+tr:hover td{background:#FCFDFF}
+
+/* ---------- recommendation cards ---------- */
+.rec{
+  border-top:1px solid var(--rule);
+  padding:22px 0 6px;
+  display:grid;
+  grid-template-columns:64px minmax(0,1fr);
+  gap:20px;
+}
+.rec:first-of-type{border-top:1px solid var(--rule-strong)}
+.rec .id{
+  font-family:var(--mono);font-size:12px;
+  color:var(--ink-3);padding-top:4px;letter-spacing:.02em;
+}
+.rec h4{
+  margin:0 0 8px;font-size:16.5px;font-weight:700;letter-spacing:-.01em;line-height:1.5;
+}
+.rec h4 .cost{
+  font-family:var(--mono);font-size:10.5px;font-weight:500;
+  color:var(--ink-3);border:1px solid var(--rule);border-radius:3px;
+  padding:1px 6px;margin-left:10px;white-space:nowrap;
+}
+.rec h4 .cost.hot{color:var(--green);border-color:#BEE4D7;background:var(--green-tint)}
+.rec p{margin:0 0 12px;font-size:15px;line-height:1.82;max-width:64ch}
+.rec .body{padding-bottom:6px}
+
+.tier{
+  display:flex;align-items:center;gap:14px;
+  margin:52px 0 4px;
+  font-family:var(--mono);font-size:11px;color:var(--ink-3);
+}
+.tier::after{content:"";flex:1;height:1px;background:var(--rule)}
+.tier b{color:var(--ink);font-weight:600;letter-spacing:.06em}
+
+/* ---------- closing ---------- */
+.closing{
+  margin-top:92px;padding:44px 0 0;
+  border-top:1px solid var(--rule-strong);
+}
+.closing h2{margin-bottom:20px}
+.closing ol{
+  margin:0;padding-left:1.4em;max-width:64ch;
+  color:var(--ink-2);
+}
+.closing li{margin-bottom:12px;padding-left:4px}
+.closing li::marker{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.closing strong{color:var(--ink)}
+
+footer{
+  margin-top:64px;padding-top:18px;border-top:1px solid var(--rule);
+  font-family:var(--mono);font-size:11px;color:var(--ink-3);
+  display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;
+}
+
+@media (max-width:900px){
+  .wrap{padding:0 24px 80px}
+  .topbar{padding:12px 24px}
+  .sec{grid-template-columns:1fr;gap:20px}
+  .gutter{position:static}
+  .gutter .num{margin-bottom:6px}
+  .gutter .path{display:inline;margin-right:12px}
+  .gutter .path + .path{margin-top:0}
+  .rec{grid-template-columns:1fr;gap:6px}
+  .rec .id{padding-top:0}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .stats div:first-child{padding-left:20px}
+  .stats div:nth-child(3){padding-left:0;border-left:0}
+  .stats div:nth-child(3),
+  .stats div:nth-child(4){border-top:1px solid var(--rule)}
+}
+@media (max-width:760px){
+  .relay{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .relay li{padding:20px 20px 14px 0}
+  .relay .rnote{max-width:22ch}
+  table{font-size:13.5px}
+  table thead{display:none}
+  table tr{display:block;padding:14px 0 8px;border-bottom:1px solid var(--rule)}
+  table td{display:block;padding:0 0 7px;border:0;width:auto}
+  table td:first-child{width:auto;font-size:15px}
+  table td.loc{white-space:normal;font-size:11px;overflow-wrap:break-word}
+  table caption{display:none}
+}
+@media (max-width:560px){
+  body{font-size:16px}
+  .wrap{padding:0 18px 64px}
+  .hero{padding-top:48px}
+  .stats{grid-template-columns:1fr}
+  .stats div,
+  .stats div:first-child{padding:13px 0}
+  .stats div + div{padding-left:0;border-left:0;border-top:1px solid var(--rule)}
+  .relay{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .relay li{padding:20px 18px 16px 0}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+}
+.codetabs{margin:26px 0 28px;border:1px solid var(--rule);background:var(--surface)}
+.codetabs .tabs{display:flex;flex-wrap:wrap;border-bottom:1px solid var(--rule)}
+.codetabs button{
+  flex:1 1 auto;
+  font-family:var(--mono);font-size:11.5px;color:var(--ink-3);
+  background:none;border:0;border-right:1px solid var(--rule);
+  padding:11px 14px;cursor:pointer;white-space:nowrap;
+  transition:background 120ms ease,color 120ms ease;
+}
+.codetabs button:last-child{border-right:0}
+.codetabs button:hover{background:#F1F5FB;color:var(--ink-2)}
+.codetabs button[aria-selected="true"]{
+  background:var(--blue-tint);color:var(--blue);
+  box-shadow:inset 0 -2px 0 var(--blue);
+}
+.codetabs .pane{padding:16px 18px;font-size:14.2px;line-height:1.8;color:var(--ink-2);max-width:none}
+.codetabs .pane b{color:var(--ink)}
+.codetabs .pane code:not(pre code){white-space:normal;word-break:break-word}
+.codetabs .pane[hidden]{display:none}
+.step{margin:0 0 4px;font-family:var(--mono);font-size:11px;color:var(--blue);letter-spacing:.02em}
+
+/* severity chips */
+.sev{
+  display:inline-block;font-family:var(--mono);font-size:10px;font-weight:600;
+  padding:1px 6px;border-radius:2px;white-space:nowrap;letter-spacing:.02em;
+}
+.sev.s1{background:#FDECEC;color:#A81E1E;border:1px solid #F5C6C6}
+.sev.s2{background:#FDF3E4;color:#95560A;border:1px solid #F0DCB8}
+.sev.s3{background:#EEF2F8;color:#4A5C72;border:1px solid #D8E0EA}
+td .sev{vertical-align:1px}
+</style></head>
+<body>
+
+<div class="topbar">
+  <div class="id"><b>windows-paste</b> 设计亮点分析</div>
+  <div class="meta">
+    <span>Tauri 2 / React 18 / Rust</span>
+    <span>v0.2.0</span>
+    <span>2026-10-20</span>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <section class="hero">
+    <h1>这个项目真正的设计密度，<br>在三处<em>边界</em>上。</h1>
+
+    <p class="lede">
+      表面看，它是一套把 macOS Paste 的卡片美学搬到 Windows 的界面。但翻过 <code>styles.css</code> 之后，
+      有意思的部分在另一侧：<strong>进程边界</strong>（Web 视图与 Rust 宿主之间怎么说话）、
+      <strong>格式边界</strong>（Windows 剪贴板一次复制携带的其实是一组格式，不是一值）、
+      <strong>焦点边界</strong>（面板抢走焦点之后，如何把 Ctrl+V 准确送回你原来在的那个窗口）。
+      下面按这三条线拆，再补一份细节清单、<strong>九组缺陷评估</strong>，和一组可以继续推进的设计。
+    </p>
+
+    <div class="stats">
+      <div><b>5,017</b><span>行代码 · Rust 2,781 / 前端 2,236</span></div>
+      <div><b>12</b><span>个 Rust 源文件，职责单线切分</span></div>
+      <div><b>3</b><span>个独立 Win32 消息泵线程</span></div>
+      <div><b>500</b><span>条历史容量，置顶不受限</span></div>
+    </div>
+
+    <div class="swatches" aria-label="产品语义色令牌">
+      <span class="lbl">产品自身的语义令牌 →</span>
+      <span class="sw"><i style="background:var(--c-text)"></i>文本 F4F8FE</span>
+      <span class="sw"><i style="background:var(--c-link)"></i>链接 EDFCF6</span>
+      <span class="sw"><i style="background:var(--c-image)"></i>图像 F8FAFC</span>
+      <span class="sw"><i style="background:var(--c-color)"></i>颜色 FAF5FF</span>
+      <span class="sw"><i style="background:var(--c-files)"></i>文件 FFFEF2</span>
+      <span class="sw ring"><i style="background:#fff"></i>选中环 007AFF</span>
+    </div>
+
+    <div class="relay-wrap">
+      <div class="relay-head">
+        <b>一次粘贴的完整往返</b>
+        <span>从热键到 Ctrl+V 落键，约 100–160 ms · 上排 t0–t3，下排 t4–t7</span>
+      </div>
+      <ol class="relay">
+        <li class="done"><span class="t">t0</span><span class="ev">Ctrl Shift V</span><span class="rnote">RegisterHotKey<br>→ WM_HOTKEY</span></li>
+        <li class="done"><span class="t">t1</span><span class="ev">记住前台窗口</span><span class="rnote">GetForegroundWindow<br>存入 last_target_hwnd</span></li>
+        <li class="done"><span class="t">t2</span><span class="ev">面板浮出</span><span class="rnote">居中于光标所在<br>那块显示器</span></li>
+        <li><span class="t">t3</span><span class="ev">选择 / 搜索</span><span class="rnote">方向键矩阵导航<br>后端维护 selected_id</span></li>
+        <li><span class="t">t4</span><span class="ev">Enter</span><span class="rnote">先隐藏面板<br>否则焦点是错的</span></li>
+        <li><span class="t">t5</span><span class="ev">原生格式回写</span><span class="rnote">CF_UNICODETEXT /<br>CF_DIB / CF_HDROP</span></li>
+        <li><span class="t">t6</span><span class="ev">抢回前台</span><span class="rnote">SetForegroundWindow<br>+ 等待 100 ms</span></li>
+        <li><span class="t">t7</span><span class="ev">SendInput</span><span class="rnote">合成 Ctrl+V<br>落回原窗口</span></li>
+      </ol>
+    </div>
+  </section>
+
+  <figure class="arch">
+    <figcaption>
+      <span>fig.1 — 一条通道，两种方向</span>
+      <span>实线 = 请求 / 事件 · 全部状态归宿主</span>
+    </figcaption>
+    <svg viewBox="0 0 1040 392" role="img" aria-label="架构图：React 视图层通过 invoke/host-push 与 Rust 宿主通信，宿主负责 SQLite 与 blobs，并向 Win32 注册剪贴板、热键、托盘监听">
+      <defs>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#46566B"/>
+        </marker>
+        <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#0B5CE8"/>
+        </marker>
+      </defs>
+
+      <text x="0" y="18" font-family="Cascadia Mono,Consolas,monospace" font-size="10.5" fill="#7D8A9B">视图层 · 无状态投影</text>
+      <text x="332" y="18" font-family="Cascadia Mono,Consolas,monospace" font-size="10.5" fill="#7D8A9B">宿主层 · 唯一真相源</text>
+      <text x="784" y="18" font-family="Cascadia Mono,Consolas,monospace" font-size="10.5" fill="#7D8A9B">内核事件源</text>
+
+      <!-- LEFT -->
+      <rect x="0" y="40" width="236" height="330" fill="#FFFFFF" stroke="#BECADC"/>
+      <rect x="12" y="58" width="212" height="54" fill="#EDF3FF" stroke="#C7D8F5"/>
+      <text x="24" y="80" font-family="Cascadia Mono,Consolas,monospace" font-size="11" fill="#0B5CE8">bridge.ts</text>
+      <text x="24" y="100" font-size="11.5" fill="#2A3F5C">send() / onPush()</text>
+
+      <line x1="16" y1="130" x2="220" y2="130" stroke="#DEE5EF"/>
+      <text x="16" y="152" font-size="12.5" fill="#46566B">App.tsx · 状态机 / 键盘</text>
+      <text x="16" y="176" font-size="12.5" fill="#46566B">CardGrid · 虚拟网格</text>
+      <text x="16" y="200" font-size="12.5" fill="#46566B">ClipCard · 语义分类</text>
+      <text x="16" y="224" font-size="12.5" fill="#46566B">ContextMenu · 分类</text>
+      <text x="16" y="248" font-size="12.5" fill="#46566B">ToolBar · 搜索 / 导航</text>
+      <text x="16" y="272" font-size="12.5" fill="#46566B">TitleBar · 无边框窗控</text>
+      <text x="16" y="308" font-size="10.5" fill="#7D8A9B">组件不知道 Tauri 存在，</text>
+      <text x="16" y="326" font-size="10.5" fill="#7D8A9B">只渲染宿主推来的最后一帧。</text>
+      <text x="16" y="350" font-size="10.5" fill="#7D8A9B">DOM 内零业务状态。</text>
+
+      <!-- ARROWS -->
+      <path d="M236,70 L328,70" stroke="#46566B" stroke-width="1.2" fill="none" marker-end="url(#ar)"/>
+      <path d="M328,92 L236,92" stroke="#0B5CE8" stroke-width="1.2" fill="none" marker-end="url(#ar2)"/>
+      <text x="248" y="62" font-family="Cascadia Mono,Consolas,monospace" font-size="10" fill="#46566B">invoke</text>
+      <text x="246" y="110" font-family="Cascadia Mono,Consolas,monospace" font-size="10" fill="#0B5CE8">host-push</text>
+
+      <!-- CENTER -->
+      <rect x="332" y="40" width="396" height="360" fill="#FFFFFF" stroke="#BECADC"/>
+      <text x="352" y="64" font-family="Cascadia Mono,Consolas,monospace" font-size="12" fill="#101A26">Tauri 宿主 · Rust</text>
+
+      <rect x="352" y="76" width="356" height="54" fill="#F7F9FC" stroke="#DEE5EF"/>
+      <text x="366" y="99" font-size="12.5" fill="#101A26">dispatch · 单一命令 + tagged enum</text>
+      <text x="366" y="118" font-size="10.5" fill="#7D8A9B">一个入口，16 个请求变体</text>
+
+      <path d="M530,130 L530,148" stroke="#BECADC" fill="none" marker-end="url(#ar)"/>
+
+      <rect x="352" y="148" width="356" height="64" fill="#EDF3FF" stroke="#C7D8F5"/>
+      <text x="366" y="170" font-family="Cascadia Mono,Consolas,monospace" font-size="12" fill="#0B5CE8">AppState  ·  Mutex</text>
+      <text x="366" y="188" font-size="10.5" fill="#46566B">items / selected_id / search_text / active_tag</text>
+      <text x="366" y="203" font-size="10.5" fill="#46566B">columns / last_target_hwnd</text>
+
+      <path d="M440,212 L440,232" stroke="#BECADC" fill="none" marker-end="url(#ar)"/>
+      <path d="M620,212 L620,232" stroke="#BECADC" fill="none" marker-end="url(#ar)"/>
+
+      <rect x="352" y="232" width="170" height="56" fill="#FFFFFF" stroke="#DEE5EF"/>
+      <text x="366" y="254" font-family="Cascadia Mono,Consolas,monospace" font-size="11.5" fill="#101A26">history.db</text>
+      <text x="366" y="272" font-size="11" fill="#7D8A9B">SQLite · 500 条上限</text>
+
+      <rect x="538" y="232" width="170" height="56" fill="#FFFFFF" stroke="#DEE5EF"/>
+      <text x="552" y="254" font-family="Cascadia Mono,Consolas,monospace" font-size="11.5" fill="#101A26">blobs/*.png</text>
+      <text x="552" y="272" font-size="11" fill="#7D8A9B">sha256 内容寻址</text>
+
+      <path d="M530,288 L530,312" stroke="#BECADC" fill="none" marker-end="url(#ar)"/>
+
+      <rect x="352" y="312" width="356" height="56" fill="#EBFAF4" stroke="#BFE6D8"/>
+      <text x="366" y="334" font-family="Cascadia Mono,Consolas,monospace" font-size="11" fill="#046B52">PasteService</text>
+      <text x="366" y="353" font-size="11" fill="#0C3D31">CF_* 回写 → 回前台 → SendInput</text>
+
+      <!-- RIGHT CONNECTORS -->
+      <path d="M784,114 L730,114" stroke="#46566B" fill="none" marker-end="url(#ar)"/>
+      <path d="M784,178 L730,178" stroke="#46566B" fill="none" marker-end="url(#ar)"/>
+      <path d="M784,242 L730,242" stroke="#46566B" fill="none" marker-end="url(#ar)"/>
+      <path d="M706,297 L784,297" stroke="#046B52" fill="none" marker-end="url(#ar)"/>
+
+      <!-- RIGHT -->
+      <rect x="784" y="40" width="256" height="330" fill="#FFFFFF" stroke="#BECADC"/>
+      <text x="800" y="64" font-family="Cascadia Mono,Consolas,monospace" font-size="12" fill="#101A26">Win32</text>
+
+      <rect x="800" y="82" width="224" height="50" fill="#F7F9FC" stroke="#DEE5EF"/>
+      <text x="812" y="103" font-size="10.5" fill="#101A26">AddClipboardFormatListener</text>
+      <text x="812" y="121" font-size="10.5" fill="#7D8A9B">隐藏窗口 · 零轮询</text>
+
+      <rect x="800" y="144" width="224" height="50" fill="#F7F9FC" stroke="#DEE5EF"/>
+      <text x="812" y="165" font-size="11" fill="#101A26">RegisterHotKey</text>
+      <text x="812" y="183" font-size="10.5" fill="#7D8A9B">Ctrl+Shift+V · NOREPEAT</text>
+
+      <rect x="800" y="206" width="224" height="50" fill="#F7F9FC" stroke="#DEE5EF"/>
+      <text x="812" y="227" font-size="11" fill="#101A26">Shell_NotifyIconW</text>
+      <text x="812" y="245" font-size="10.5" fill="#7D8A9B">托盘常驻 · 原生菜单</text>
+
+      <rect x="800" y="272" width="224" height="50" fill="#EBFAF4" stroke="#BFE6D8"/>
+      <text x="812" y="293" font-size="11" fill="#0C3D31">SendInput</text>
+      <text x="812" y="311" font-size="10.5" fill="#046B52">合成 Ctrl+V 击键</text>
+
+      <text x="800" y="348" font-size="10.5" fill="#7D8A9B">↑ 三个回调各自跑在独立线程的</text>
+      <text x="800" y="364" font-size="10.5" fill="#7D8A9B">消息泵里，触碰窗口时统一</text>
+      <text x="800" y="380" font-size="10.5" fill="#7D8A9B">run_on_main_thread 回主线程。</text>
+    </svg>
+  </figure>
+
+  <!-- ============ 01 ============ -->
+  <section class="sec">
+    <div class="gutter">
+      <span class="num">01</span>
+      <span class="path">commands.rs</span>
+      <span class="path">bridge.ts</span>
+      <span class="path">paste.rs</span>
+      <span class="path">db.rs</span>
+    </div>
+    <div class="body">
+      <h2>三处边界，三种解法</h2>
+      <p class="lead">
+        判断一个桌面应用的工程质量，看的不是它有多少功能，而是它在"跨不过去的缝"上做了什么选择。
+        这个项目一共面对三条缝，而且三条都选了偏难但更正确的那一边。
+      </p>
+
+      <h3><span class="idx">1.1</span>进程边界：一条通道，两个方向</h3>
+      <p>
+        前端和后端之间没有一堆细碎的 IPC 方法，只有一个 <code>dispatch</code> 命令，请求体是一个
+        serde 内部标签枚举。这个决定的好处会随时间放大：新增一个能力（分类标签、窗口最大化）不需要动
+        IPC 注册表，只需要给枚举加一个变体；前端的 <code>bridge.ts</code> 因此能压到两个导出函数，
+        组件层完全不知道 Tauri 的存在。
+      </p>
+
+      <figure class="code">
+        <figcaption><span>src-tauri/src/commands.rs</span><span class="ln">17–22</span></figcaption>
+<pre><code><span class="kw">#[derive(Debug, Deserialize)]</span>
+#[serde(tag = <span style="color:#9BD1A8">"type"</span>, rename_all = <span style="color:#9BD1A8">"camelCase"</span>)]
+<span class="kw">pub enum</span> HostRequest {
+    Ready,
+    Search  { text: String },
+    Paste   { item_id: i64 },          <span class="cm">// ↔ { type: "paste", itemId: 7 }</span>
+    SetTag  { item_id: i64, tag: Option&lt;String&gt; },
+    <span class="cm">// ……共 16 个变体，覆盖搜索 / 选择 / 粘贴 / 分类 / 窗控</span>
+}</code></pre>
+      </figure>
+
+      <p>
+        更关键的是反方向的对称：后端不返回结果，而是往同一条 <code>host-push</code> 事件流里推消息，
+        消息同样带 <code>type</code> 判别字段。这意味着"谁改的状态"被彻底交给了宿主——剪贴板线程新增一条、
+        托盘清空全部、前端点了置顶，走的是同一个 <code>push_items</code> / <code>push_selection</code>。
+        前端于是退化成一个纯投影：<strong>它不推导任何业务状态，只渲染最后一帧</strong>。
+      </p>
+
+      <div class="note">
+        <span class="tag">为什么这个选择适合剪贴板</span>
+        <b>因为剪贴板是外部事件驱动的。</b>用户随时可能在别的窗口复制东西，这不是前端发起的请求，
+        而是一次推送。若采用传统的"请求-响应"RPC，前端就得轮询或额外开一条事件通道；
+        选用命令 + 推送的双向模型，等于一开始就把"谁都可能改变状态"这件事写进了协议。
+      </div>
+
+      <p>
+        代价也很直接：所有请求都排队在同一个 <code>Mutex&lt;AppState&gt;</code> 上，而
+        <code>AppState</code> 里既有数据库句柄又有全量条目列表。第 03 节会展开这一点。
+      </p>
+
+      <h3><span class="idx">1.2</span>格式边界：一次复制是一组格式，不是一个值</h3>
+      <p>
+        这是整个项目最有含金量的部分，也是多数 Windows 剪贴板工具做错的地方。
+        Windows 剪贴板从来不是"存一段文本"，而是<strong>同一份内容以多种格式并列存在</strong>。
+        在资源管理器里复制一个文件，系统会同时提供 <code>CF_HDROP</code>（文件列表句柄）和
+        <code>CF_UNICODETEXT</code>（路径文本）；截图工具给的往往是 <code>CF_DIB</code>、
+        <code>CF_DIBV5</code> 和 <code>CF_BITMAP</code> 三份。
+      </p>
+      <p>
+        项目的读取侧按 <code>Files &gt; Image &gt; Text</code> 的优先级取"信息量最大"的那一份作为主类型
+        （<code>clipboard.rs:148</code>），这个顺序是对的：文件列表能降级成文本，反过来不行。
+        但真正漂亮的是写入侧——它不是把主类型还原成单一格式，而是<strong>把多个格式一起写回去</strong>：
+      </p>
+
+      <figure class="code">
+        <figcaption><span>src-tauri/src/paste.rs</span><span class="ln">206–266（节选）</span></figcaption>
+<pre><code><span class="cm">// 手工构造 DROPFILES 头 + UTF-16 文件列表（每个路径单 null，整体双 null 收尾）</span>
+<span class="kw">let</span> df = DropFiles { p_files: 20, pt: POINT { x: 0, y: 0 }, f_nc: 0, f_wide: 1 };
+std::ptr::copy_nonoverlapping(&amp;df <span class="kw">as</span> *<span class="kw">const</span> _ <span class="kw">as</span> *<span class="kw">const</span> u8, ptr, 20);
+
+SetClipboardData(CF_HDROP, hmem_drop);        <span class="cm">// → 资源管理器：贴出文件本身</span>
+SetClipboardData(CF_UNICODETEXT, hmem_text);  <span class="cm">// → 编辑器：贴出路径文本</span></code></pre>
+      </figure>
+
+      <p>
+        一次回写，两个落点。你复制了三个文件，然后在聊天框里 <code>Ctrl+V</code>：得到路径；
+        在资源管理器里 <code>Ctrl+V</code>：得到文件。用户不需要知道格式这回事，而这份"不需要知道"
+        正是靠后端多写了十六行代码换来的。
+      </p>
+
+      <div class="codetabs" role="group" aria-label="同一次回写在不同目标应用里的落点">
+        <div class="tabs" role="tablist">
+          <button role="tab" aria-selected="true" aria-controls="pane-explorer" id="tab-explorer">目标：资源管理器</button>
+          <button role="tab" aria-selected="false" aria-controls="pane-editor" id="tab-editor" tabindex="-1">目标：编辑器 / 聊天框</button>
+          <button role="tab" aria-selected="false" aria-controls="pane-paint" id="tab-paint" tabindex="-1">目标：画图 / Word</button>
+        </div>
+
+        <div class="pane" role="tabpanel" id="pane-explorer" aria-labelledby="tab-explorer">
+          <p class="step">剪贴板里同时躺着 CF_HDROP + CF_UNICODETEXT</p>
+          <p style="margin:0">资源管理器只读 <b>CF_HDROP</b>，于是贴出的是<b>文件本身</b>——三份 docx、pdf、png 原样落进目标文件夹，命名与时间戳都保留。</p>
+        </div>
+
+        <div class="pane" role="tabpanel" id="pane-editor" aria-labelledby="tab-editor" hidden>
+          <p class="step">同一份剪贴板，未做任何额外处理</p>
+          <p style="margin:0">编辑器读不到 CF_HDROP，于是退到 <b>CF_UNICODETEXT</b>，贴出的是<b>三行换行分隔的完整路径</b>。发文件路径给同事、粘进 Git 提交信息，都直接可用。</p>
+        </div>
+
+        <div class="pane" role="tabpanel" id="pane-paint" aria-labelledby="tab-paint" hidden>
+          <p class="step">图像条目：CF_DIB（40 字节 BITMAPINFOHEADER + BGRA 像素）</p>
+          <p style="margin:0">不是贴一段文本占位，而是<b>真正的位图</b>。截图可以直接进画图继续标注、进 Word 变成可裁剪的对象、进 Photoshop 变成图层。</p>
+        </div>
+      </div>
+
+      <p>
+        上面三个页签说的是同一件事：<strong>剪贴板的正确抽象不是"一个值"，而是"一组格式"</strong>。
+        写入方把所有合理格式都放进去，读取方各自挑自己认识的，谁都不需要协商。
+        这个模型也正是 R5（CF_HTML）能低成本实现的原因——它只是再往这组格式里加一项。
+      </p>
+
+      <script>
+      (function () {
+        var box = document.currentScript.closest('.codetabs');
+        if (!box) return;
+        var tabs = box.querySelectorAll('[role="tab"]');
+        function select(id) {
+          tabs.forEach(function (t) {
+            var on = t.id === 'tab-' + id;
+            t.setAttribute('aria-selected', on ? 'true' : 'false');
+            t.tabIndex = on ? 0 : -1;
+            var pane = box.querySelector('#' + t.getAttribute('aria-controls'));
+            if (pane) pane.hidden = !on;
+          });
+        }
+        tabs.forEach(function (t) {
+          t.addEventListener('click', function () {
+            select(t.id.replace('tab-', ''));
+          });
+          t.addEventListener('keydown', function (e) {
+            var i = Array.prototype.indexOf.call(tabs, t);
+            var n = tabs.length;
+            var to = e.key === 'ArrowRight' ? (i + 1) % n
+              : e.key === 'ArrowLeft' ? (i - 1 + n) % n : -1;
+            if (to < 0) return;
+            e.preventDefault();
+            tabs[to].focus();
+            select(tabs[to].id.replace('tab-', ''));
+          });
+        });
+      })();
+      </script>
+      <p>
+        图像的方向同样较真。读取时手工解析 <code>BITMAPINFOHEADER</code>，处理 24/32bpp、
+        每行四字节对齐的 stride、以及 <code>biHeight</code> 为正时的 bottom-up 行序；
+        还处理了一个很实际的坑——很多来源的 32bpp 位图 alpha 通道全是 0，直接透传会得到一张全透明的图，
+        所以做了 <code>if a == 0 { 255 }</code> 的兜底（<code>clipboard.rs:346</code>）。
+        回写时反向手工拼一个 40 字节头加 BGRA 像素，把 PNG 还原成真正的 <code>CF_DIB</code>
+        （<code>paste.rs:126</code>），而不是偷懒贴一段文本占位。所以截图能贴回画图、Photoshop、Word。
+      </p>
+
+      <div class="note ok">
+        <span class="tag">设计判断</span>
+        <b>把"格式"当成领域概念，而不是实现细节。</b>很多同类工具在数据库里只存一个字符串，
+        类型只是给 UI 换图标的标签；这里 <code>Text / Image / Files</code> 是三种真实的存储与回写路径，
+        数据库里 <code>Type</code> 字段决定的是读取分支、blob 归属和写回格式。这是抽象层次选对了。
+      </div>
+
+      <h3><span class="idx">1.3</span>焦点边界：Ctrl+V 要落在"呼出之前"的那个窗口</h3>
+      <p>
+        这是最容易被忽略、也最容易做错的一环。天真的做法是：用户按 Enter 时调
+        <code>GetForegroundWindow()</code> 拿到前台窗口，再切回去。但那时前台窗口已经是面板自己了，
+        于是 Ctrl+V 会打进自己的 WebView——什么都没发生，或者更糟，触发了页面里的快捷键。
+      </p>
+      <p>
+        正确做法是把"记住目标"这一步提前到<strong>面板出现之前</strong>。项目在
+        <code>toggle_panel</code> 里就把前台窗口句柄存进 <code>last_target_hwnd</code>
+        （<code>lib.rs:176</code>），此后整个会话都用这个快照：
+      </p>
+
+      <figure class="code">
+        <figcaption><span>lib.rs:176 → commands.rs:212 → paste.rs:53</span><span class="ln">粘贴事务的三段</span></figcaption>
+<pre><code><span class="cm">// ① 呼出前：记下用户真正在用的窗口</span>
+guard.last_target_hwnd = PasteService::get_foreground_window() <span class="kw">as</span> isize;
+
+<span class="cm">// ② 粘贴前：必须先隐藏面板，否则焦点仍然属于自己</span>
+window.hide();
+PasteService::write_to_clipboard(&amp;item, &amp;blobs);
+
+<span class="cm">// ③ 回前台 → 等一帧 → 注入击键</span>
+SetForegroundWindow(target);
+thread::sleep(Duration::from_millis(<span style="color:#F2C078">100</span>));   <span class="cm">// 前台锁是异步的</span>
+Self::send_ctrl_v();</code></pre>
+      </figure>
+
+      <p>
+        顺序里每一步都不能换位置：隐藏必须在写剪贴板之前（否则隐藏动作本身会抢走刚设好的前台），
+        等待必须在 <code>SetForegroundWindow</code> 之后（Windows 的前台锁机制会让切换异步完成，
+        立刻发键会打进旧窗口），而 <code>SendInput</code> 必须用扫描码级别的事件而不是
+        <code>keybd_event</code>，才能被游戏和部分终端正确接收。
+      </p>
+
+      <div class="note warn">
+        <span class="tag">一个还没被利用的钩子</span>
+        <code>PasteService::paste_item</code> 成功之后没有做任何收尾，而 <code>clipboard.rs</code>
+        里其实已经准备好了一个 <code>CLIP_PAUSED</code> 原子开关和 <code>set_paused()</code> 方法——
+        只是全项目没有一处调用它。目前靠"回写触发的 <code>WM_CLIPBOARDUPDATE</code> 会被 hash 去重挡掉"
+        来兜底，逻辑上成立，但属于用去重代替了本该显式的暂停语义。
+      </div>
+
+      <h3><span class="idx">1.4</span>状态边界：置顶是一句"不会被淘汰"的承诺</h3>
+      <p>
+        容量修剪通常写成"超出 500 条就删最老的"，一句话，但会顺手把用户精心置顶的东西删掉。
+        这里把承诺写进了 SQL：只对 <code>Pinned = 0</code> 的行做 <code>OFFSET</code>，置顶项永久豁免。
+        更细的一点是，删行的时候把 <code>BlobPath</code> 一起取出来，文件同步从磁盘删掉——
+        否则历史库会一直很干净，而 <code>blobs/</code> 目录会悄悄涨到几百兆。
+      </p>
+
+      <figure class="code">
+        <figcaption><span>src-tauri/src/db.rs</span><span class="ln">216–240</span></figcaption>
+<pre><code>SELECT Id, BlobPath FROM ClipboardItems
+<span class="kw">WHERE</span> Pinned = 0                     <span class="cm">-- 置顶项不参与淘汰</span>
+<span class="kw">ORDER BY</span> CreatedAt <span class="kw">DESC</span>, Id <span class="kw">DESC</span>
+<span class="kw">LIMIT</span> -1 <span class="kw">OFFSET</span> ?1                <span class="cm">-- 取容量之外的全部</span>
+
+<span class="cm">// 删行的同时删文件，避免 blob 目录成为孤儿回收站</span>
+<span class="kw">if let</span> Some(b) = blob { fs::remove_file(paths.blobs.join(b)); }</code></pre>
+      </figure>
+
+      <p>
+        去重策略也值得记一笔：只跟<strong>最新一条</strong>比较 hash，而不是全表 <code>SELECT</code>。
+        这是一个 O(1) 的幂等检查——连续触发多次 <code>WM_CLIPBOARDUPDATE</code>（同一次复制常常会触发两三次）
+        只会入库一次。hash 还带了类型前缀，<code>text:…</code> / <code>files:…</code>，
+        避免不同格式的相同字节撞在一起。
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ 02 ============ -->
+  <section class="sec">
+    <div class="gutter">
+      <span class="num">02</span>
+      <span class="path">clipboard.rs</span>
+      <span class="path">tray.rs</span>
+      <span class="path">CardGrid.tsx</span>
+      <span class="path">selftest.rs</span>
+    </div>
+    <div class="body">
+      <h2>值得单独点出来的细节</h2>
+      <p class="lead">
+        下面这些不属于"架构"，但每一处都对应一个具体的 Windows 坑或交互坑。
+        大部分同类项目会在这里留下毛边。
+      </p>
+
+      <div class="tablewrap">
+        <table>
+          <caption>原生层与数据层</caption>
+          <thead>
+            <tr><th>细节</th><th>位置</th><th>解决了什么</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>零轮询监听</td>
+              <td class="loc">clipboard.rs:97</td>
+              <td>用 <code>AddClipboardFormatListener</code> 加一个隐藏窗口，靠 <code>WM_CLIPBOARDUPDATE</code> 唤醒。相比每秒轮询序列号，空闲时 CPU 占用是零。</td>
+            </tr>
+            <tr>
+              <td>三个独立消息泵</td>
+              <td class="loc">clipboard / hotkey / tray</td>
+              <td>每个 Win32 监听各自开一条线程跑 <code>GetMessageW</code> 循环，互不阻塞；需要碰窗口时统一 <code>run_on_main_thread</code> 回主线程。线程归属非常清楚。</td>
+            </tr>
+            <tr>
+              <td>剪贴板打开重试</td>
+              <td class="loc">clipboard.rs:162</td>
+              <td><code>OpenClipboard</code> 一次成功是运气。这里 8 次 × 25ms 重试，是 Windows 剪贴板编程的必备礼貌——别的进程可能正持有锁。</td>
+            </tr>
+            <tr>
+              <td>图像内容寻址</td>
+              <td class="loc">clipboard.rs:363</td>
+              <td>blob 文件名就是 PNG 字节的 sha256。同一张图复制十次只占一份磁盘，且天然去重，不需要额外索引。</td>
+            </tr>
+            <tr>
+              <td>守卫式失焦隐藏</td>
+              <td class="loc">lib.rs:32</td>
+              <td><code>BlurGuard</code> 原子标记：面板真正被唤起之前，忽略所有失焦事件。否则启动期的焦点抖动会让面板刚显示就自己关掉——一个非常典型、非常难查的 bug。</td>
+            </tr>
+            <tr>
+              <td>关闭即隐藏</td>
+              <td class="loc">lib.rs:81</td>
+              <td><code>CloseRequested</code> 里 <code>prevent_close()</code> 后转 hide，进程带着热键和托盘常驻。关闭按钮不会杀死监听。</td>
+            </tr>
+            <tr>
+              <td>托盘图标现场解码</td>
+              <td class="loc">tray.rs:127</td>
+              <td>不用 <code>LoadIcon</code> 拿资源，而是把 PNG 手动解码成 BGRA、走 <code>CreateDIBSection</code> + <code>CreateIconIndirect</code> 造一个 HICON。目的是绕开 Windows Shell 的图标缓存——改了图标立刻生效。</td>
+            </tr>
+            <tr>
+              <td>多显示器居中</td>
+              <td class="loc">window_util.rs:116</td>
+              <td>按光标位置 <code>MonitorFromPoint</code> 取那块屏的 <code>rcWork</code>（已排除任务栏），而不是主屏尺寸。副屏用户不会被弹到主屏去。</td>
+            </tr>
+            <tr>
+              <td>平滑 schema 升级</td>
+              <td class="loc">db.rs:59</td>
+              <td><code>let _ = ALTER TABLE ADD COLUMN Tag</code>，忽略"列已存在"的错误。没有迁移框架，但老库能直接用。</td>
+            </tr>
+            <tr>
+              <td>四象限过滤</td>
+              <td class="loc">db.rs:118</td>
+              <td>关键字 × 标签的四种组合各自一条预编译 SQL，避免在 SQL 里拼 <code>WHERE 1=1 AND …</code> 这种字符串拼接。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="tablewrap">
+        <table>
+          <caption>界面层与工程层</caption>
+          <thead>
+            <tr><th>细节</th><th>位置</th><th>解决了什么</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>列数回传后端</td>
+              <td class="loc">CardGrid.tsx:65</td>
+              <td>前端算出当前几列，主动 <code>send({ type: 'columns' })</code> 告诉宿主。于是"↓ 键跳一行"在后端也能算对——键盘语义和响应式布局被接通了，这在 Web 桌面应用里很少见。</td>
+            </tr>
+            <tr>
+              <td>虚拟网格</td>
+              <td class="loc">CardGrid.tsx:123</td>
+              <td>一个撑高度的 spacer + 绝对定位的可见层 + <code>translate3d</code> 位移 + 上下各 2 行 overscan。500 条历史只挂载可见的十几张卡。</td>
+            </tr>
+            <tr>
+              <td>滚动 rAF 节流</td>
+              <td class="loc">CardGrid.tsx:87</td>
+              <td>用一个 <code>rafRef</code> 做闸门，一帧最多一次 <code>setState</code>。滚动事件的高频特性被驯服了。</td>
+            </tr>
+            <tr>
+              <td>语义分类留在展示层</td>
+              <td class="loc">ClipCard.tsx:56</td>
+              <td>文本再细分为"链接 / 颜色 / 普通文本"全靠前端正则 + <code>useMemo</code>，后端的类型枚举只有三值。领域判断放在它该在的层，数据库不用为 UI 好奇心改表。</td>
+            </tr>
+            <tr>
+              <td>选中项滚入视口</td>
+              <td class="loc">CardGrid.tsx:139</td>
+              <td>手算 <code>itemTop / itemBottom</code> 再调 <code>scrollTop</code>，而不是 <code>scrollIntoView</code>——后者会把嵌套滚动容器一起推动，导致整页跳一下。只滚到"刚好够看见"。</td>
+            </tr>
+            <tr>
+              <td>输入态避让</td>
+              <td class="loc">App.tsx:126</td>
+              <td>全局键盘钩子先判断 <code>target.tagName</code> 是不是输入框。否则在搜索框里打字会把 <code>Delete</code>、<code>p</code> 全劫持掉。</td>
+            </tr>
+            <tr>
+              <td>浏览器降级开发</td>
+              <td class="loc">bridge.ts:63</td>
+              <td>检测到不在 Tauri 里就跑 <code>seedDevData</code> 灌假数据。UI 可以纯 <code>vite dev</code> 调试，不必每次等 Rust 编译。</td>
+            </tr>
+            <tr>
+              <td>内建 E2E 自检</td>
+              <td class="loc">selftest.rs</td>
+              <td><code>--selftest</code> 直接调 <code>dispatch</code> 跑完搜索、导航、置顶、删除、剪贴板往返、窗口几何、标签过滤九项，用进程退出码表达结果。没有 Playwright、没有 WebDriver，CI 里一行命令就能回归。</td>
+            </tr>
+            <tr>
+              <td>发布态瘦身</td>
+              <td class="loc">Cargo.toml:40</td>
+              <td><code>lto = true</code> + <code>codegen-units = 1</code> + <code>panic = "abort"</code> + <code>strip = true</code>。单一 exe，无需运行时。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note">
+        <span class="tag">一个能说明取舍的体量数字</span>
+        前端 2,236 行里，<code>styles.css</code> 占了 1,017 行——接近一半。
+        这不是"样式没整理"，而是产品定位的直接结果：<b>这个项目的核心竞争力就是视觉与手感的还原度</b>，
+        逻辑代码反而应该越薄越好。看代码分布就知道作者把力气花在哪了。
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 03 ============ -->
+  <section class="sec">
+    <div class="gutter">
+      <span class="num">03</span>
+      <span class="path">state.rs</span>
+      <span class="path">commands.rs</span>
+      <span class="path">App.tsx</span>
+      <span class="path">tauri.conf.json</span>
+    </div>
+    <div class="body">
+      <h2>代价、边界，和一份完整的缺陷清单</h2>
+      <p class="lead">
+        上面所有设计都不是免费的。这一节把账算清楚：有些是确凿的 bug，有些是资源泄漏，
+        有些只是没做完——按"会不会丢东西"排序，而不是按代码好不好看。
+        一共 9 组，前 3 组属于"不该带着上线"的级别。
+      </p>
+
+      <h3><span class="idx">3.1</span>会丢数据的三处</h3>
+      <p>
+        这一组最该先修，因为它们损坏的不是体验，是用户已经存下来的东西。
+      </p>
+
+      <div class="tablewrap">
+        <table>
+          <caption>数据完整性</caption>
+          <thead><tr><th>问题</th><th>位置</th><th>后果</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="sev s1">严重</span> 自检会清空真实历史</td>
+              <td class="loc">lib.rs:41<br>lib.rs:220</td>
+              <td><code>--selftest</code> 走 <code>seed_sample_data()</code>，它第一件事是 <code>db.clear()</code>，
+                操作的正是 <code>%LOCALAPPDATA%\WindowsPaste\history.db</code>。开发期跑一次自检，
+                用户全部记录被换成 50 条假数据，且不可恢复。而 <code>package.json</code> 把
+                <code>npm run test:selftest</code> 作为公开脚本暴露着。</td>
+            </tr>
+            <tr>
+              <td><span class="sev s2">泄漏</span> 图片文件只删一半</td>
+              <td class="loc">lib.rs:197<br>db.rs:189</td>
+              <td>三条删除路径只有 <code>trim()</code> 会清理磁盘：<code>db.delete()</code> 只删行，
+                <code>clear()</code> 明明把 <code>BlobPath</code> 列表当返回值交出来了，
+                <code>lib.rs:197</code> 却是 <code>let _ = guard.db.clear();</code>——直接丢弃。
+                手动删一张截图、或用托盘「清空历史」，PNG 全部留在 <code>blobs/</code> 里永不回收。
+                历史库看起来很干净，磁盘只涨不落。</td>
+            </tr>
+            <tr>
+              <td><span class="sev s1">严重</span> DIB 解析信任外部数据</td>
+              <td class="loc">clipboard.rs:317</td>
+              <td><code>slice::from_raw_parts(pixel_ptr, total_pixels_size)</code> 的长度来自剪贴板数据头部
+                自己声明的宽高，没有用 <code>GlobalSize</code> 跟实际分配大小校验。
+                别的进程只要往剪贴板塞一个头部撒谎的 DIB，这段 <code>unsafe</code> 就会读到分配区之外。</td>
+            </tr>
+            <tr>
+              <td><span class="sev s2">泄漏</span> <code>content</code> 不截断</td>
+              <td class="loc">model.rs:45<br>db.rs:81</td>
+              <td>只有 <code>preview()</code> 截 200 字符，<code>content</code> 原样进库、原样过 IPC。
+                复制一份几 MB 的日志全文，之后<strong>每一次推送</strong>都带着它跑一遍。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="note warn">
+        <span class="tag">修法都很短</span>
+        自检改成写到 <code>%TEMP%</code> 下的独立库（或加一个 <code>--db &lt;path&gt;</code> 参数）；
+        <code>clear()</code> 复用 <code>trim()</code> 里已有的删文件循环；
+        DIB 解析前先 <code>let size = GlobalSize(hmem)</code>，断言
+        <code>header + stride * height &lt;= size</code>；<code>content</code> 入库时截到 8KB。
+        四条加起来的改动量不超过 40 行，但没有一条会被现有测试发现——这正是缺测试成本的体现。
+      </div>
+
+      <h3><span class="idx">3.2</span>程序没有单例保护</h3>
+      <p>
+        这是个常驻进程：它注册全局热键、占用托盘、独占一个 SQLite 连接。而它没有任何单实例机制——
+        没有互斥量、没有命名管道、没有 <code>tauri-plugin-single-instance</code>。
+        双击两次图标，就会开出两个完整实例。
+      </p>
+      <p>
+        连锁反应逐条都是可见的：第二个进程的 <code>RegisterHotKey</code> 失败（热键已归第一个），
+        而它失败时静默退出这条线程（见 3.4），于是第一个实例的热键仍然可用——表面上"没事"，
+        但新弹出来的面板属于第二个进程。<strong>两个实例各自维护一份内存里的
+        <code>AppState</code></strong>，你在 A 面板里删了一条，B 面板不会知道；两边都在监听剪贴板，
+        同一次复制会被写入两次（虽然 hash 去重会挡住，但推送和 UI 更新是双份的）；托盘上叠两个图标。
+        两个 SQLite 连接并发写，还没开 WAL，撞锁时 <code>add()</code> 的失败会被
+        <code>let _ =</code> 吞掉，条目静默丢失。
+      </p>
+
+      <figure class="code">
+        <figcaption><span>建议：Tauri 2 的官方做法</span><span class="ln">Cargo.toml + lib.rs</span></figcaption>
+<pre><code><span class="cm">// Cargo.toml</span>
+tauri-plugin-single-instance = <span style="color:#9BD1A8">"2"</span>
+
+<span class="cm">// lib.rs —— 必须是第一个注册的插件</span>
+tauri::Builder::default()
+    .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        <span class="cm">// 第二个实例启动时回调到这里，而不是继续初始化；</span>
+        <span class="cm">// 直接把已有窗口唤到前台，语义正好等于"再按一次热键"</span>
+        toggle_panel(app);
+    }))
+    .manage(state)
+    <span class="cm">// ……</span></code></pre>
+      </figure>
+
+      <p>
+        值得单独说一句的是：<code>Mutex&lt;AppState&gt;</code> 保护的是<strong>进程内</strong>的并发，
+        对跨进程毫无作用。开发者可能正是因为"我已经有一把锁了"而忽略了这件事——
+        这是单例保护最容易被略过的地方。
+      </p>
+
+      <h3><span class="idx">3.3</span>数据进得来，出不去</h3>
+      <p>
+        这是一个完全本地、跑了好几个月、存了五百条珍贵片段的应用，而它<strong>没有任何导入导出</strong>。
+        没有备份、没有迁移、换一台机器只能从头开始。更麻烦的是数据的形态决定了这件事不容易补：
+        历史分散在 SQLite 和一个按 sha256 命名的 blob 目录里，两者靠 <code>BlobPath</code> 一列关联，
+        拷贝 <code>history.db</code> 而不拷 <code>blobs/</code>，所有图片就会变成裂图。
+      </p>
+
+      <div class="tablewrap">
+        <table>
+          <caption>三种导出格式的取舍</caption>
+          <thead><tr><th>格式</th><th>适合</th><th>代价</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>JSON + 图片目录</td>
+              <td>最忠实：完整保留 <code>Type / Hash / Pinned / Tag / CreatedAt</code> 与原始 PNG，
+                可以做到无损往返，也是内部备份的默认格式。</td>
+              <td>不是人类可读的交换格式，图片仍然是散文件。建议打成单个 <code>.zip</code>，
+                里面 <code>items.json</code> + <code>blobs/</code>。</td>
+            </tr>
+            <tr>
+              <td>Markdown</td>
+              <td>给人看、给别的工具吃。按 Tag 分节，每条一段，图片用相对路径引用。
+                丢置顶与精确时间，但换到 Obsidian / Notion 里仍可用。</td>
+              <td>有损，只能单向导出，不适合当备份。</td>
+            </tr>
+            <tr>
+              <td>纯文本 / CSV</td>
+              <td>最省事，只有文本条目有意义。适合"我只想把复制过的代码片段捞出来"这个具体诉求。</td>
+              <td>图片与文件条目只能降级成一行说明。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        导入侧比导出侧难，难点全在<strong>冲突与幂等</strong>：同一个 <code>Hash</code> 已经存在时是跳过、
+        覆盖还是新建一条？<code>CreatedAt</code> 用文件里的还是导入时刻的？Tag 撞名要不要合并？
+        一个稳妥的默认是：<strong>以 <code>Hash</code> 为幂等键</strong>，已存在则只更新
+        <code>Pinned</code> / <code>Tag</code> 这类用户产出的元数据，不碰 <code>CreatedAt</code>。
+        这样同一个包导入十次，结果和导入一次完全一样——这正是 <code>Hash</code> 字段当初就存在、
+        却只被用于"跟最新一条比对"的价值没被榨干的地方。
+      </p>
+
+      <div class="note">
+        <span class="tag">一个顺带的收获</span>
+        做导入导出会强迫你把"一条剪贴板记录"定义清楚——它到底包含哪些字段、哪些是内容、哪些是用户附加的元数据。
+        这个定义现在散落在 <code>ClipboardItem</code> 结构体、<code>ClipItemDto</code> 和 SQL 建表语句三处，
+        彼此并不完全一致（比如 DTO 多出 <code>preview</code> 和 <code>imageUrl</code> 两个纯展示字段）。
+        导出格式一旦定下来，它就成了这条记录的权威定义。
+      </div>
+
+      <h3><span class="idx">3.4</span>单个 Mutex 装着整个世界</h3>
+      <p>
+        <code>AppState</code> 同时持有数据库句柄、全量条目、选中态、搜索词和列数，挂在唯一一把
+        <code>Mutex</code> 后面。剪贴板回调路径是：拿锁 → 写 SQLite → <code>reload()</code> 全表重查
+        → 把整表序列化成 DTO → <code>emit</code>。这些全部在锁内完成。
+      </p>
+      <p>
+        500 条上限把问题压住了，但它是有天花板的：图片条目在 DTO 转换时要读文件、做 base64
+        （<code>state.rs:90</code>），而<strong>每一次推送都会重编码全部可见图片</strong>。
+        用户连续按三下搜索键，可能触发三轮全表 + 全图重编码。列表里图片一多，面板就会开始顿。
+      </p>
+
+      <figure class="code">
+        <figcaption><span>src-tauri/src/state.rs</span><span class="ln">90–101 · 每次推送都重新编码</span></figcaption>
+<pre><code><span class="kw">let</span> image_url = item.blob_path.as_ref()
+    .and_then(|name| std::fs::read(blobs_dir.join(name)).ok())
+    .map(|bytes| {
+        <span class="kw">let</span> encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+        format!(<span style="color:#9BD1A8">"data:image/png;base64,{}"</span>, encoded)   <span class="cm">// ← 体积放大器</span>
+    });</code></pre>
+      </figure>
+
+      <div class="note warn">
+        <span class="tag">现成的优化就在配置文件里</span>
+        <code>tauri.conf.json</code> 已经开了 asset 协议，scope 精确指向
+        <code>$LOCALAPPDATA/WindowsPaste/blobs/**</code>，但代码里一次都没用过
+        <code>convertFileSrc</code>。也就是说<b>这块基础设施是通的，只是没人走</b>。
+        一条图片从几 MB 的 base64 变成一个几十字节的 URL，只需要改这一个函数。
+      </div>
+
+      <h3><span class="idx">3.5</span>上下方向键与列数耦合（确凿的 bug）</h3>
+      <p>
+        前端把"下一行"硬编码成 <code>delta: 4</code>，后端用
+        <code>delta.unsigned_abs() &gt;= columns</code> 来判断这是不是一次跨行移动。
+        列数等于 4 时一切正常；但当窗口被最大化、或者用户在大屏上拉到 5 列以上，
+        <code>4 &gt;= 5</code> 为假，<code>step</code> 退化成 1——<strong>按 ↑↓ 会变成左右移动一格</strong>。
+      </p>
+
+      <figure class="code">
+        <figcaption><span>src-tauri/src/commands.rs</span><span class="ln">230–232 · 一行之差</span></figcaption>
+<pre><code><span class="cm">// 当前：把"跨行"的判断标准绑在一个前端魔法数字上</span>
+<span class="kw">let</span> vertical = delta.unsigned_abs() &gt;= state.columns <span class="kw">as</span> u64 &amp;&amp; delta.abs() &gt; 1;
+<span class="kw">let</span> step = <span class="kw">if</span> vertical { state.columns <span class="kw">as</span> i64 } <span class="kw">else</span> { 1 };
+
+<span class="cm">// 建议：绝对值大于 1 就代表"按行走"，符号代表方向。列数只用来定步长。</span>
+<span class="kw">let</span> by_row = delta.abs() &gt; 1;
+<span class="kw">let</span> step  = <span class="kw">if</span> by_row { state.columns <span class="kw">as</span> i64 } <span class="kw">else</span> { 1 };</code></pre>
+      </figure>
+
+      <p>
+        更深一层的问题是协议本身：用"位移量"编码"方向 + 语义"两种信息，让前端不得不猜后端的列数。
+        更干净的表达是让前端只说意图——<code>{ type: 'move', axis: 'row', sign: -1 }</code>——
+        后端自己去乘列数。这是 1.1 里那个单一通道唯一没做彻底的地方。
+      </p>
+
+      <h3><span class="idx">3.6</span>重复项策略会留下"幽灵副本"</h3>
+      <p>
+        去重只跟最新一条比。所以 <code>A → B → A</code> 的复制序列会得到两条 A。
+        常见的剪贴板应用在这里的做法是"触摸"而不是"插入"：命中重复时把那条的
+        <code>CreatedAt</code> 更新为现在，让它回到列表顶部——用户的心智是"我刚复制的东西应该在第一个"，
+        而不是"它被丢掉了"。
+      </p>
+      <p>
+        顺带一提，<code>db.rs</code> 的 <code>trim()</code> 每删一行都调一次 <code>AppPaths::get()</code>
+        重新拼路径、重建目录（<code>db.rs:235</code>）。功能无碍，但这是循环里的无谓 IO，挪到循环外即可。
+      </p>
+
+      <h3><span class="idx">3.7</span>静默失败、死代码，和没被用上的索引</h3>
+      <p>
+        热键线程里，<code>RegisterHotKey</code> 返回 0（被别的程序占用）时，线程直接
+        <code>return</code> 结束，没有任何提示。用户装完软件按下 Ctrl+Shift+V 毫无反应，
+        而 Ctrl+Shift+V 恰好是 VS Code、Windows Terminal、Notion 都在用的组合——撞车概率不低。
+        这是本项目<strong>最需要补的一个反馈回路</strong>：注册失败应当弹一次提示并引导改键。
+      </p>
+      <p>
+        <code>SetForegroundWindow</code> 的返回值同样没检查，也没有 <code>AttachThreadInput</code>
+        之类的兜底。更现实的是提权窗口——UIPI 会拦住非提权进程的 <code>SendInput</code>，
+        往管理员权限的终端里粘贴会静默失败，用户完全不知道为什么没反应。
+      </p>
+      <p>
+        全项目零日志：<code>let _ =</code> 吞掉了几乎所有数据库写入和窗口操作的错误，
+        <code>lib.rs:206</code> 那个 <code>notify()</code> 函数从来没被调用过。出了问题只能靠猜。
+      </p>
+      <p>
+        还有一处自相矛盾：项目在架构上坚持"宿主是唯一真相源"，可 <code>ContextMenu.tsx:21</code>
+        把 <code>PRESET_TAGS</code> 硬编码在前端。分类的领域数据跑到了视图层。
+      </p>
+
+      <div class="tablewrap">
+        <table>
+          <caption>成本为零的清理项</caption>
+          <thead><tr><th>项</th><th>位置</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>死代码</td>
+              <td class="loc">clipboard.rs:35</td>
+              <td><code>CLIP_PAUSED</code> 与 <code>set_paused()</code> 从未被调用，暂停监听的开关做好了但没接线。</td>
+            </tr>
+            <tr>
+              <td>冗余依赖</td>
+              <td class="loc">Cargo.toml:22</td>
+              <td><code>directories = "5.0"</code> 与 tauri 的 <code>tray-icon</code> feature 都没用上——
+                路径是手拼 <code>LOCALAPPDATA</code>，托盘是 <code>Shell_NotifyIconW</code> 原生实现的。</td>
+            </tr>
+            <tr>
+              <td>没被用的索引</td>
+              <td class="loc">db.rs:55</td>
+              <td><code>IX_ClipboardItems_Hash</code> 建了但没有任何查询按 Hash 过滤——去重是在 Rust 里
+                比对最新一条的字符串。白白付写入成本，还占空间。</td>
+            </tr>
+            <tr>
+              <td>软断言</td>
+              <td class="loc">selftest.rs:225</td>
+              <td>第 7 项失败分支也计 PASS；第 6 项把 <code>49</code> 硬编码成"种子 50 减一"，
+                换个 <code>--seed</code> 参数就误报。</td>
+            </tr>
+            <tr>
+              <td>循环里的 IO</td>
+              <td class="loc">db.rs:235</td>
+              <td><code>trim()</code> 每删一行都调一次 <code>AppPaths::get()</code> 重新拼路径、重建目录。
+                挪到循环外即可。</td>
+            </tr>
+            <tr>
+              <td>文档漂移</td>
+              <td class="loc">commands.rs:1<br>.cursor/plans/</td>
+              <td>模块注释还写着"lets the existing Vue component logic translate almost line for line"；
+                <code>.cursor/plans/webview2_vue_popup.md</code> 整篇是 WPF 迁 Vue 的方案，
+                与现在这套 Tauri + React 代码毫无关系。</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3><span class="idx">3.8</span>输入法与可访问性</h3>
+      <p>
+        搜索框没有处理输入法的 <code>compositionstart</code> / <code>compositionend</code> 事件。
+        打"代码"这两个字时，拼音还没上屏就逐字母触发了查询——一次输入白跑四五次全表
+        <code>LIKE '%x%'</code> 扫描，中文用户每次搜索都要付这笔钱。
+      </p>
+      <p>
+        卡片是 <code>&lt;div&gt;</code> 加 <code>onClick</code>，不可聚焦、没有 <code>role</code>、
+        没有 <code>aria-*</code>，全局还设了 <code>user-select: none</code>。
+        键盘能用是因为另写了一套全局钩子，但屏幕阅读器读到的是一堆无语义容器。
+        这不影响"能干活"，但它是应用商店与无障碍审计里的硬伤。
+      </p>
+
+      <h3><span class="idx">3.9</span>缺失的能力</h3>
+      <p>
+        没有暗色主题（令牌已经集中在 <code>:root</code>，加一套 <code>prefers-color-scheme</code>
+        的覆盖成本很低）；没有富文本——所有文本都被规范化成纯文本，从网页复制带样式的段落会丢格式，
+        这是与 Paste.app 差距最明显的一项；搜索没有防抖，且是 <code>LIKE '%x%'</code> 全表扫，
+        走不了索引；<code>CSP</code> 为 <code>null</code>，对纯本地应用风险可控，但仍是关掉的一道防线。
+      </p>
+
+      <div class="note">
+        <span class="tag">这份清单说明了什么</span>
+        难点选对了、难点的实现也对了（第 01、02 节），但<strong>边界情况、错误路径、资源生命周期、
+        可访问性</strong>这一整类问题几乎全空。前者靠洞察力，后者靠工程纪律和测试覆盖——
+        而这个项目一行前端测试都没有，<code>npm test</code> 只跑 cargo，且跑之前会先清空你的真实历史。
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 04 ============ -->
+  <section class="sec">
+    <div class="gutter">
+      <span class="num">04</span>
+      <span class="path">建议 R1–R17</span>
+      <span class="path">P0 止血 → P3 结构</span>
+    </div>
+    <div class="body">
+      <h2>可以继续推进的设计</h2>
+      <p class="lead">
+        按"改动量 ÷ 收益"排。P0 是止血：不修就会丢数据或少东西。P1 是当天能做完、
+        立刻能感觉到的。P2 是体验分水岭。P3 是结构升级，值得单独立项。
+      </p>
+
+      <div class="tier"><b>P0</b><span>先止血：不修就会丢东西</span></div>
+
+      <div class="rec">
+        <div class="id">R1</div>
+        <div class="body">
+          <h4>自检不许碰真实数据库<span class="cost hot">改动 ≈ 10 行</span></h4>
+          <p>
+            最优先。把 <code>--selftest</code> 与 <code>--seed</code> 的库路径改到
+            <code>%TEMP%\WindowsPaste-selftest\{pid}\</code>，跑完连同 blob 目录一起删掉。
+            更彻底的做法是给 <code>AppPaths::get()</code> 加一个 <code>root_override: Option&lt;PathBuf&gt;</code>，
+            让"用什么库"变成一个显式参数而不是环境里隐式的 <code>LOCALAPPDATA</code>。
+            在修好之前，<b>应该先把 <code>test:selftest</code> 这个 npm script 从 package.json 摘掉</b>，
+            避免有人手滑清空自己的历史。
+          </p>
+        </div>
+      </div>
+
+      <div class="rec">
+        <div class="id">R2</div>
+        <div class="body">
+          <h4>blob 文件的删除要跟上行的删除<span class="cost hot">改动 ≈ 15 行</span></h4>
+          <p>
+            <code>clear()</code> 已经把待删文件列表返回了，调用方却丢掉不用；<code>delete()</code>
+            干脆不返回。把两者都改成返回 <code>Vec&lt;String&gt;</code>，由调用方统一删文件，
+            或者更省心——把删文件下沉到 <code>Database</code> 内部，让它自己持有 <code>blobs</code> 路径。
+            顺带补一个"启动时扫描孤儿 blob"的清理（列出目录里不在表中的文件，删掉），
+            这样历史遗留的泄漏也能自愈。
+          </p>
+        </div>
+      </div>
+
+      <div class="rec">
+        <div class="id">R3</div>
+        <div class="body">
+          <h4>单实例：第二次启动只是唤回面板<span class="cost hot">改动 ≈ 5 行</span></h4>
+          <p>
+            接入 <code>tauri-plugin-single-instance</code>，回调里直接调 <code>toggle_panel(app)</code>。
+            语义上正好——用户点第二次图标，本来就是想要那个面板，而不是想要第二个进程。
+            这一步同时消灭了两个托盘图标、双份剪贴板监听、以及两个 SQLite 连接并发写同一文件的隐患。
+            顺手把 SQLite 切到 WAL 模式（<code>PRAGMA journal_mode=WAL</code>），
+            让"万一真有第二个人打开这个库"时不至于直接撞锁失败。
+          </p>
+        </div>
+      </div>
+
+      <div class="rec">
+        <div class="id">R4</div>
+        <div class="body">
+          <h4>DIB 解析加长度校验，<code>content</code> 入库截断<span class="cost hot">改动 ≈ 15 行</span></h4>
+          <p>
+            前者是安全边界：<code>from_raw_parts</code> 之前先用 <code>GlobalSize(hmem)</code>
+            核对头部声明的 <code>header_size + row_stride × height</code> 不越界，越界就放弃这条。
+            后者是内存与 IPC 边界：<code>content</code> 入库时截到 8KB（<code>preview()</code> 仍然只取 200 字符），
+            并在 UI 上标一句"内容已截断"。两处都是几行的事，但一个防崩溃、一个防卡顿。
+          </p>
+        </div>
+      </div>
+
+      <div class="tier"><b>P1</b><span>低风险，当天可完成</span></div>
+
+      <div class="rec">
+        <div class="id">R5</div>
+        <div class="body">
+          <h4>图片改走 asset 协议，别再塞 base64<span class="cost hot">改动 ≈ 5 行</span></h4>
+          <p>
+            把 <code>ClipItemDto::from_item</code> 里的读文件 + base64 换成
+            <code>convertFileSrc(blobPath)</code>。图片负载从"每张几 MB、每次推送重发"
+            变成"每张一个 URL，WebView 自己按需加载并缓存"。IPC 体积、内存峰值、滚动卡顿会一起好转，
+            而且配置里 <code>assetProtocol.scope</code> 已经写好了，不需要动权限。
+          </p>
+        </div>
+      </div>
+
+      <div class="rec">
+        <div class="id">R6</div>
+        <div class="body">
+          <h4>修正上下键的列数假设<span class="cost hot">改动 1 行</span></h4>
+          <p>
+            <code>delta.abs() &gt; 1</code> 判语义、<code>signum()</code> 判方向、<code>columns</code> 只定步长。
+            顺手把前端那两处 <code>delta: ±4</code> 换成发送 <code>axis: 'row'</code>，
+            让"一行几张卡"这件事永远只由后端知道。
+          </p>
+        </div>
+      </div>
+
+      <div class="rec">
+        <div class="id">R7</div>
+        <div class="body">
+          <h4>重复内容"提到最前"，而不是丢掉或再插一条<span class="cost hot">改动 ≈ 10 行</span></h4>
+          <p>
+            <code>add()</code> 命中最新 hash 时返回 <code>false</code> 之外，再提供一条分支：
+            命中任意历史项时 <code>UPDATE CreatedAt</code> 并把它移回列表首。这符合"我刚复制的应该在第一个"
+            的直觉，也顺带解决了 <span style="white-space:nowrap">A→B→A</span> 产生副本的问题。
+            <b>这条同时是 R8 的基础</b>——幂等的 Hash 查询正是导入功能的落点。
+          </p>
+        </div>
+      </div>
+
+      <div class="rec">
+        <div class="id">R8</div>
+        <div class="body">
+          <h4>导入 / 导出，用 Hash 做幂等键<span class="cost">改动 ≈ 150 行</span></h4>
+          <p>
+            导出走「JSON + blobs 目录」打成一个 zip：<code>items.json</code> 里放
+            <code>Type / Content / Hash / CreatedAt / Pinned / Tag</code>，<code>blobs/</code> 放原始 PNG。
+            这是唯一能无损往返的格式，也是备份的默认选项。另做 Markdown 导出（按 Tag 分节，
+            图片用相对路径）给人看，以及纯文本导出给"我只想把复制过的代码捞出来"这个具体诉求。
+          </p>
+          <p>
+            导入的关键是<strong>幂等</strong>：以 <code>Hash</code> 为键查库，
+            已存在则只更新 <code>Pinned</code> / <code>Tag</code> 这类用户产出的元数据，
+            不碰 <code>CreatedAt</code>；不存在才插入，并把 blob 写回 <code>blobs/</code>。
+            这样同一个包导入十次，结果与导入一次完全相同。
+            界面上给一个"将导入 N 条，其中 M 条已存在"的预览，别让用户盲点确认。
+          </p>
+          <p>
+            顺带的好处：<code>IX_ClipboardItems_Hash</code> 这个现在白建的索引终于有了用途，
+            导入时的存在性检查会真的走它。
+          </p>
+        </div>
+      </div>
+
+      <div class="rec">
+        <div class="id">R9</div>
+        <div class="body">
+          <h4>搜索防抖 120 ms + 输入法保护<span class="cost hot">改动 ≈ 20 行</span></h4>
+          <p>
+            现在每次 <code>onChange</code> 都会触发一次全表查询 + 全量推送。加一个
+            <code>useDeferredValue</code> 或手写定时器，把连续输入合并成一次请求；
+            同时监听 <code>compositionstart</code> / <code>compositionend</code>，
+            拼音未上屏期间不发查询。后者对中文用户是必需项而不只是优化——现在打"代码"两个字
+            会白跑四五次全表扫描。
+          </p>
+        </div>
+      </div>
+
+      <div class="rec">
+        <div class="id">R10</div>
+        <div class="body">
+          <h4>暗色主题<span class="cost hot">改动 ≈ 60 行 CSS</span></h4>
+          <p>
+            令牌已经全部集中在 <code>:root</code>，加一段
+            <code>@media (prefers-color-scheme: dark)</code> 覆盖同名变量即可，
+            组件一个都不用改。这也是对 1,017 行 CSS 那次投资的直接回报。
+          </p>
+        </div>
+      </div>
+
+      <div class="tier"><b>P2</b><span>体验分水岭</span></div>
+
+      <div class="rec">
+        <div class="id">R11</div>
+        <div class="body">
+          <h4>支持 CF_HTML，让"从网页复制"不丢样式<span class="cost">需要改表结构</span></h4>
+          <p>
+            这是与 Paste.app 差距最大的一项。做法和文件那次"双格式回写"完全同构：
+            读取时若存在 <code>text/html</code>（CF_HTML），把 HTML 片段与纯文本一起存下来；
+            回写时同时写 <code>CF_HTML</code> 和 <code>CF_UNICODETEXT</code>。Word、飞书、Notion
+            会拿到带样式的版本，记事本拿到的仍是纯文本。<b>项目已经证明过这个模式能跑通，复制一遍即可。</b>
+          </p>
+        </div>
+      </div>
+
+      <div class="rec">
+        <div class="id">R12</div>
+        <div class="body">
+          <h4>粘贴变体：Enter 原样 / Ctrl+Enter 纯文本<span class="cost">改动 ≈ 30 行</span></h4>
+          <p>
+            "粘贴为纯文本"是这类工具的招牌。实现上是在回写时只写 <code>CF_UNICODETEXT</code>
+            而跳过富格式——正好复用 R11 建立的双通道。再补一个 Shift+Enter（粘贴后回车），
+            三个键位覆盖 90% 的粘贴场景。
+          </p>
+        </div>
+      </div>
+
+      <div class="rec">
+        <div class="id">R13</div>
+        <div class="body">
+          <h4>热键可配置，且注册失败必须说话<span class="cost">改动 ≈ 40 行</span></h4>
+          <p>
+            热键写死在 <code>hotkey.rs:62</code>，冲突时静默退出。建议把组合键移到设置里持久化，
+            并在 <code>registered == 0</code> 时通过托盘气泡或首次启动的提示条告诉用户"这个组合被占用了，
+            点这里换一个"。<b>静默失败是这个项目目前最伤的一处体验缺口</b>——用户会以为是软件坏了。
+          </p>
+        </div>
+      </div>
+
+      <div class="rec">
+        <div class="id">R14</div>
+        <div class="body">
+          <h4>把 set_paused 接上：暂停监听 + 应用排除<span class="cost">改动 ≈ 50 行</span></h4>
+          <p>
+            开关已经在 <code>clipboard.rs</code> 里躺着。托盘菜单加一项"暂停记录 30 分钟"，
+            再接一个"密码管理器窗口前台时不记录"的判断（取 <code>GetForegroundWindow</code>
+            的进程名做白名单）。剪贴板工具处理密码、验证码这类内容是刚需，也是它最容易失信的地方。
+          </p>
+        </div>
+      </div>
+
+      <div class="tier"><b>P3</b><span>结构升级</span></div>
+
+      <div class="rec">
+        <div class="id">R15</div>
+        <div class="body">
+          <h4>推送改增量，别每次发全表<span class="cost">需要改协议</span></h4>
+          <p>
+            目前每次状态变化都推完整 <code>items</code>。改成
+            <code>{ type: 'patch', upsert: [...], remove: [ids], order: [...] }</code>，
+            前端按 id 做 reconciliation。条目上千之后这是唯一能保持流畅的路径，
+            也为 R11 的富内容留出体积预算。
+          </p>
+        </div>
+      </div>
+
+      <div class="rec">
+        <div class="id">R16</div>
+        <div class="body">
+          <h4>拖拽粘贴，替代模拟击键<span class="cost">工作量中等</span></h4>
+          <p>
+            面板里按住卡片拖到目标窗口，走 OLE <code>DoDragDrop</code>（或 tauri 的 drag 事件 + 原生
+            <code>IDropTarget</code>）。优势是不依赖前台焦点，也不会被"前台锁"或游戏的反作弊拦掉，
+            更绕开了 UIPI 对提权窗口的限制；<code>SendInput</code> 那条路径保留作为快捷键方式的兜底。
+          </p>
+        </div>
+      </div>
+
+      <div class="rec">
+        <div class="id">R17</div>
+        <div class="body">
+          <h4>全文检索，而不只是 LIKE<span class="cost">工作量中等</span></h4>
+          <p>
+            <code>LIKE '%x%'</code> 无法命中索引。两种走法：SQLite FTS5（对中文需要自己分词，
+            可用 trigram tokenizer），或者对内容做规范化后维护一张倒排表。
+            如果只想要"够用"，也可以先给 <code>Content</code> 加一个前缀索引，
+            把"以某词开头"的查询变成快路径，模糊查询再回落到扫描。
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="closing">
+    <h2>如果只做四件事</h2>
+    <p class="lead">前两件是止血，后两件是让它真正可用。加起来不到两小时。</p>
+    <ol>
+      <li><strong>让自检别碰真实数据库</strong>（R1）。现在跑一次 <code>npm run test:selftest</code>
+        就会把用户全部历史换成 50 条假数据。这个必须先修，或者先把那个 npm script 摘掉。</li>
+      <li><strong>接上单实例</strong>（R3）。五行代码，消掉双托盘、双监听、双写库这一整串问题。</li>
+      <li><strong>blob 文件跟着行一起删</strong>（R2）。否则用户每删一张截图，磁盘上就多一个永不回收的 PNG。</li>
+      <li><strong>热键注册失败时给个提示</strong>（R13 的最小版）。静默失败比功能缺失更伤——
+        它让用户以为整个程序坏了。</li>
+    </ol>
+    <p style="margin-top:26px;max-width:64ch">
+      再往后，真正的分水岭是 <strong>CF_HTML</strong>（R11）与<strong>导入导出</strong>（R8）。
+      前者补齐与 Paste.app 最大的一处体验差距，后者决定这个应用的数据到底属于用户还是属于这台机器——
+      一个存了五百条珍贵片段、却没有备份出口的本地应用，本质上是在赌硬盘不出问题。
+    </p>
+  </section>
+
+  <footer>
+    <span>windows-paste · 设计评析</span>
+    <span>行号基于当前工作区快照，可能随重构变动</span>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -31,7 +31,7 @@ pub fn start(app: AppHandle) {
         println!("========================================================");
 
         let mut passed = 0;
-        let total = 9;
+        let total = 10;
 
         // --------------------------------------------------------------------
         // TEST 1: SQLite 数据库与 50 条测试种子数据验证
@@ -96,7 +96,7 @@ pub fn start(app: AppHandle) {
         // --------------------------------------------------------------------
         // TEST 4: 矩阵焦点导航与跨行移动 (Move Navigation)
         // --------------------------------------------------------------------
-        print!("  [4/{}] 验证键盘矩阵焦点移动 (+1, -1, +4 换行)... ", total);
+        print!("  [4/{}] 验证键盘矩阵焦点移动 (单格 + 跨行)... ", total);
         let first_id = {
             let guard = state.lock().unwrap();
             guard.items[0].id
@@ -112,8 +112,8 @@ pub fn start(app: AppHandle) {
             let guard = state.lock().unwrap();
             guard.selected_id
         };
-        // 向下跨行移动 4 格 (跨越整整一行)
-        let _ = dispatch(app.clone(), app.state::<SharedState>(), HostRequest::Move { delta: 4 });
+        // 跨行移动：|delta| > 1 即"按行走"，步长由后端的 columns 决定
+        let _ = dispatch(app.clone(), app.state::<SharedState>(), HostRequest::Move { delta: 2 });
         let row2_id = {
             let guard = state.lock().unwrap();
             guard.selected_id
@@ -170,9 +170,11 @@ pub fn start(app: AppHandle) {
         // TEST 6: 卡片删除与本地持久化同步 (Delete Item)
         // --------------------------------------------------------------------
         print!("  [6/{}] 验证卡片物理删除与列表自动更新... ", total);
-        let del_target = {
+        // 用删除前的总数做基准，而不是把 50 硬编码成 49——
+        // 换个 --seed 参数就不会再误报。
+        let (del_target, before_count) = {
             let guard = state.lock().unwrap();
-            guard.items.last().cloned()
+            (guard.items.last().cloned(), guard.total_count)
         };
         let mut test6_ok = false;
         if let Some(del_item) = del_target {
@@ -182,7 +184,8 @@ pub fn start(app: AppHandle) {
                 HostRequest::Delete { item_id: del_item.id },
             );
             let guard = state.lock().unwrap();
-            test6_ok = guard.total_count == 49 && !guard.items.iter().any(|i| i.id == del_item.id);
+            test6_ok = guard.total_count + 1 == before_count
+                && !guard.items.iter().any(|i| i.id == del_item.id);
         }
         if test6_ok {
             println!("PASS (历史记录减 1，已淘汰项从数据库清除)");
@@ -213,17 +216,30 @@ pub fn start(app: AppHandle) {
         crate::paste::PasteService::write_to_clipboard(&test_item, &blobs_dir);
         thread::sleep(Duration::from_millis(30));
 
-        // 从 Win32 系统剪贴板读回验证
+        // 从 Win32 系统剪贴板读回验证。
+        //
+        // 这里原来是软断言：读回失败也算 PASS，测试永远不会红。
+        // 现在改成真的断言——剪贴板被别的进程锁住确实可能偶发，
+        // 所以给几次重试，仍然读不回来就是失败。
         let sniffer = crate::clipboard::ClipboardSniffer::new(&blobs_dir);
-        let readback = sniffer.capture();
-        let test7_ok = readback.map(|i| i.content.contains(&magic_text)).unwrap_or(false);
+        let mut test7_ok = false;
+        for _ in 0..10 {
+            let readback = sniffer.capture();
+            if readback
+                .map(|i| i.content.contains(&magic_text))
+                .unwrap_or(false)
+            {
+                test7_ok = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+
         if test7_ok {
             println!("PASS (CF_UNICODETEXT 原生回写并验证成功)");
             passed += 1;
         } else {
-            // 如果受当前系统其它前台进程占用锁保护，只要写入逻辑执行无恐慌亦为通过
-            println!("PASS (Win32 原生剪贴板指令发送完毕)");
-            passed += 1;
+            println!("FAIL (剪贴板回写后读回内容不匹配)");
         }
 
         // --------------------------------------------------------------------
@@ -288,6 +304,63 @@ pub fn start(app: AppHandle) {
             passed += 1;
         } else {
             println!("FAIL (Tag 分类设置或过滤异常)");
+        }
+
+        // --------------------------------------------------------------------
+        // TEST 10: 任意列数下的上下键跨行移动 (Row Navigation vs Columns)
+        // --------------------------------------------------------------------
+        print!("  [10/{}] 验证 5 / 2 / 8 列时上下键都按整行移动... ", total);
+        // 这是之前那个 bug 的回归测试：列数 > 4 时上下键会退化成左右移动一格。
+        let mut test10_ok = true;
+        for columns in [5usize, 2usize, 8usize] {
+            let _ = dispatch(
+                app.clone(),
+                app.state::<SharedState>(),
+                HostRequest::Columns { columns: columns as i64 },
+            );
+
+            let (first_id, len) = {
+                let guard = state.lock().unwrap();
+                (guard.items[0].id, guard.items.len())
+            };
+
+            let _ = dispatch(
+                app.clone(),
+                app.state::<SharedState>(),
+                HostRequest::Select { item_id: first_id },
+            );
+            // delta = 4 表示"向下一行"，与具体列数无关
+            let _ = dispatch(
+                app.clone(),
+                app.state::<SharedState>(),
+                HostRequest::Move { delta: 4 },
+            );
+
+            let landed = {
+                let guard = state.lock().unwrap();
+                let selected = guard.selected_id;
+                guard
+                    .items
+                    .iter()
+                    .position(|i| Some(i.id) == selected)
+                    .unwrap_or(0)
+            };
+
+            let expected = columns.min(len.saturating_sub(1));
+            if landed != expected {
+                test10_ok = false;
+                println!(
+                    "\n    列数 {}：落到第 {} 项，期望第 {} 项",
+                    columns, landed, expected
+                );
+            }
+        }
+
+        if test10_ok {
+            println!("PASS (跨行步长随列数变化，不再依赖魔法数字 4)");
+            passed += 1;
+        } else {
+            println!("FAIL (跨行步长未随列数变化)");
         }
 
         let elapsed = start_time.elapsed();

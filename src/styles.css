@@ -548,6 +548,14 @@ body {
   object-fit: contain;
 }
 
+/* asset 协议不可用（浏览器预览 / 文件缺失）时的占位 */
+.image-fallback {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 0 8px;
+  text-align: center;
+}
+
 .card-foot {
   flex: 0 0 auto;
   display: flex;
@@ -1014,4 +1022,500 @@ body {
 
 .new-tag-confirm:hover {
   background: #1d4ed8;
+}
+
+/* ==========================================================================
+   热键不可用提示
+   ========================================================================== */
+.hotkey-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 7px 10px 7px 14px;
+  background: #fdf3e4;
+  border-bottom: 1px solid rgba(217, 119, 6, 0.2);
+  font-size: 12.5px;
+  color: #7a4d09;
+}
+
+.hotkey-warning-glyph {
+  font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
+  font-size: 13px;
+  color: #c2410c;
+  flex: 0 0 auto;
+}
+
+.hotkey-warning-text {
+  flex: 1 1 auto;
+  line-height: 1.6;
+}
+
+.hotkey-warning-close {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #a16207;
+  font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
+  font-size: 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hotkey-warning-close:hover {
+  background: rgba(217, 119, 6, 0.15);
+}
+
+/* ==========================================================================
+   数据导入 / 导出
+   ========================================================================== */
+.data-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* 带文字的操作按钮：导入 / 导出 / 清空。
+   比纯图标更容易被发现——这三项以前藏在托盘右键菜单里，几乎没人找到过。 */
+.text-action {
+  height: 34px;
+  padding: 0 12px 0 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  transition: all 150ms ease;
+}
+
+.text-action .action-glyph {
+  font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.text-action:hover:not(:disabled) {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.14);
+  color: var(--text-main);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
+}
+
+.text-action:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* 清空是破坏性操作：默认低调，悬停时才亮出红 */
+.text-action.danger:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: rgba(220, 38, 38, 0.3);
+  color: #b91c1c;
+  box-shadow: 0 3px 8px rgba(220, 38, 38, 0.12);
+}
+
+.text-action:disabled {
+  opacity: 0.38;
+  cursor: default;
+  box-shadow: none;
+}
+
+/* ==========================================================================
+   确认对话框
+   ========================================================================== */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: dialogFade 120ms ease-out;
+}
+
+@keyframes dialogFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.dialog {
+  width: min(420px, 100%);
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 24px 56px -12px rgba(15, 23, 42, 0.32), 0 2px 8px rgba(0, 0, 0, 0.06);
+  padding: 20px 22px 18px;
+}
+
+.dialog-title {
+  margin: 0 0 12px;
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: -0.01em;
+}
+
+.dialog-body {
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--text-muted);
+}
+
+.dialog-line {
+  margin: 0 0 8px;
+}
+
+.dialog-line b {
+  color: var(--text-main);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.dialog-hint {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.dialog-btn {
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: #ffffff;
+  color: var(--text-main);
+  font-size: 13px;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.dialog-btn:hover {
+  background: #f5f7fa;
+  border-color: rgba(0, 0, 0, 0.16);
+}
+
+.dialog-btn.primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.dialog-btn.primary:hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.dialog-btn:focus-visible,
+.icon-action:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   Toast
+   ========================================================================== */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 74px;
+  transform: translateX(-50%);
+  z-index: 1300;
+  max-width: min(520px, calc(100% - 48px));
+  padding: 9px 16px;
+  border-radius: 9px;
+  background: rgba(23, 33, 47, 0.93);
+  color: #f4f7fb;
+  font-size: 12.8px;
+  line-height: 1.6;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.3);
+  pointer-events: none;
+  animation: toastIn 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+/* ==========================================================================
+   响应式
+   ========================================================================== */
+/* 窄窗口下先牺牲快捷键提示，保住搜索框和三个操作按钮 */
+@media (max-width: 980px) {
+  .shortcuts { display: none; }
+  .search { flex: 1 1 auto; max-width: none; }
+}
+
+@media (max-width: 820px) {
+  /* 再窄就把操作按钮收成纯图标（title 仍然可读） */
+  .text-action {
+    width: 34px;
+    padding: 0;
+    justify-content: center;
+    font-size: 0;
+    gap: 0;
+  }
+
+  .text-action .action-glyph { font-size: 13px; }
+
+  .toolbar { gap: 10px; padding: 10px 14px; }
+}
+
+/* ==========================================================================
+   暗色主题
+   只覆盖令牌，组件一行都不用改——这是把 1,000 行 CSS 集中到 :root 的回报。
+   ========================================================================== */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --panel-bg: rgba(24, 30, 40, 0.94);
+    --panel-border: rgba(255, 255, 255, 0.08);
+    --panel-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.06);
+
+    --text-main: #e6ecf5;
+    --text-muted: #9aa8bb;
+    --text-dim: #6b7a8d;
+
+    --paste-bg-text: #1c2432;
+    --paste-accent-text: #7aaeff;
+    --paste-border-text: rgba(122, 174, 255, 0.16);
+
+    --paste-bg-link: #172b26;
+    --paste-accent-link: #4fd1a5;
+    --paste-border-link: rgba(79, 209, 165, 0.18);
+
+    --paste-bg-image: #1d222b;
+    --paste-accent-image: #ff9c5b;
+    --paste-border-image: rgba(255, 156, 91, 0.16);
+
+    --paste-bg-color: #241d31;
+    --paste-accent-color: #c084fc;
+    --paste-border-color: rgba(192, 132, 252, 0.18);
+
+    --paste-bg-files: #2a2618;
+    --paste-accent-files: #f0b23c;
+    --paste-border-files: rgba(240, 178, 60, 0.18);
+
+    --card-shadow: 0 2px 7px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+    --card-shadow-hover: 0 8px 20px -3px rgba(0, 0, 0, 0.55), 0 3px 6px -1px rgba(0, 0, 0, 0.35);
+
+    --pin-amber: #f0b23c;
+    --pin-amber-bg: rgba(240, 178, 60, 0.18);
+  }
+
+  body {
+    color-scheme: dark;
+  }
+
+  .titlebar,
+  .toolbar {
+    background: rgba(28, 35, 46, 0.82);
+    border-color: rgba(255, 255, 255, 0.07);
+  }
+
+  .tag-filter-bar {
+    background: rgba(28, 35, 46, 0.6);
+    border-bottom-color: rgba(255, 255, 255, 0.05);
+  }
+
+  .paste-card.selected {
+    background-color: #232b3a !important;
+  }
+
+  .count-badge {
+    background: rgba(255, 255, 255, 0.1);
+    color: #b6c3d4;
+  }
+
+  .count-badge.filtering {
+    background: rgba(122, 174, 255, 0.2);
+    color: #a8c8ff;
+  }
+
+  .window-control-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #f0f5ff;
+  }
+
+  .search {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+  }
+
+  .search:focus-within {
+    background: rgba(255, 255, 255, 0.09);
+    border-color: #6fa8ff;
+    box-shadow: 0 0 0 3px rgba(111, 168, 255, 0.22);
+  }
+
+  .search-placeholder {
+    color: var(--text-dim);
+  }
+
+  .shortcut-tag kbd {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: #cfdae8;
+    box-shadow: none;
+  }
+
+  .nav-btn,
+  .text-action {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.1);
+    color: #c2cede;
+    box-shadow: none;
+  }
+
+  .nav-btn:hover:not(:disabled),
+  .text-action:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: #ffffff;
+  }
+
+  .text-action.danger:hover:not(:disabled) {
+    background: rgba(220, 38, 38, 0.18);
+    border-color: rgba(248, 113, 113, 0.4);
+    color: #fca5a5;
+  }
+
+  .tag-filter-pill {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.1);
+    color: #a9b6c7;
+  }
+
+  .tag-filter-pill:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #e6ecf5;
+  }
+
+  .tag-filter-pill.active {
+    background: #2b6cb0;
+    border-color: #2b6cb0;
+    color: #ffffff;
+  }
+
+  .paste-context-menu,
+  .paste-sub-menu {
+    background: rgba(32, 40, 53, 0.97);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  }
+
+  .menu-item {
+    color: #dbe4f0;
+  }
+
+  .menu-divider {
+    background: rgba(255, 255, 255, 0.09);
+  }
+
+  .new-tag-input {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.16);
+    color: #e6ecf5;
+  }
+
+  .dialog {
+    background: #1e2633;
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 24px 56px -12px rgba(0, 0, 0, 0.7);
+  }
+
+  .dialog-title {
+    color: #e6ecf5;
+  }
+
+  .dialog-btn {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: #dbe4f0;
+  }
+
+  .dialog-btn:hover {
+    background: rgba(255, 255, 255, 0.13);
+  }
+
+  .dialog-btn.primary {
+    background: #2b6cb0;
+    border-color: #2b6cb0;
+    color: #ffffff;
+  }
+
+  .image-stage {
+    background: rgba(0, 0, 0, 0.22);
+    border-color: rgba(255, 255, 255, 0.07);
+  }
+
+  .card-tag-pill {
+    background: rgba(122, 174, 255, 0.14);
+    border-color: rgba(122, 174, 255, 0.22);
+    color: #9cc4ff;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.16);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.28);
+  }
+
+  .toast {
+    background: rgba(240, 245, 252, 0.95);
+    color: #17212f;
+  }
+
+  .hotkey-warning {
+    background: #2f2517;
+    border-bottom-color: rgba(240, 178, 60, 0.24);
+    color: #f0c982;
+  }
+
+  .hotkey-warning-glyph {
+    color: #f0b23c;
+  }
+
+  .hotkey-warning-close {
+    color: #d9a94e;
+  }
+
+  .hotkey-warning-close:hover {
+    background: rgba(240, 178, 60, 0.16);
+  }
 }

@@ -14,13 +14,22 @@ use crate::clipboard::wide_str;
 
 const HOTKEY_ID: i32 = 0x5041; // "PA"
 
+/// 界面上展示的热键文案，注册失败时一并回传。
+pub const HOTKEY_LABEL: &str = "Ctrl + Shift + V";
+
 pub struct HotkeyManager;
 
 impl HotkeyManager {
-    /// Spawns a dedicated thread listening for Ctrl+Shift+V
-    pub fn start<F>(on_pressed: F)
+    /// Spawns a dedicated thread listening for Ctrl+Shift+V.
+    ///
+    /// `on_failed` 在热键被别的程序占用时调用一次。
+    /// Ctrl+Shift+V 恰好是 VS Code、Windows Terminal、Notion 都在用的组合，
+    /// 撞车概率不低；以前这里直接 `return` 结束线程，用户按热键毫无反应，
+    /// 只会以为软件坏了。
+    pub fn start<F, E>(on_pressed: F, on_failed: E)
     where
         F: Fn() + Send + 'static,
+        E: Fn(&'static str) + Send + 'static,
     {
         thread::spawn(move || unsafe {
             let class_name = wide_str("WindowsPaste_HotkeyWindow");
@@ -76,6 +85,9 @@ impl HotkeyManager {
                     DispatchMessageW(&msg);
                 }
                 UnregisterHotKey(hwnd, HOTKEY_ID);
+            } else {
+                // 被占用：明确告诉上层，而不是安静地什么都不做
+                on_failed(HOTKEY_LABEL);
             }
 
             DestroyWindow(hwnd);

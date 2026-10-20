@@ -1,7 +1,8 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use chrono::{DateTime, Local};
-use rusqlite::{params, Connection, Result};
+use rusqlite::{params, Connection, OptionalExtension, Result};
 
 use crate::model::{ClipboardItem, ClipboardItemType};
 
@@ -12,11 +13,19 @@ pub struct AppPaths {
 }
 
 impl AppPaths {
+    /// 用户数据目录（`%LOCALAPPDATA%\WindowsPaste`）。
     pub fn get() -> Self {
         let local_app_data = std::env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(r"C:\Users\Default\AppData\Local"));
-        let root = local_app_data.join("WindowsPaste");
+        Self::at(local_app_data.join("WindowsPaste"))
+    }
+
+    /// 在指定根目录下组织数据库与 blob 目录。
+    ///
+    /// 自检 / 种子数据必须用 `temporary_root()` 拿到临时路径再走这里，
+    /// 绝不能碰用户的真实历史。
+    pub fn at(root: PathBuf) -> Self {
         let blobs = root.join("blobs");
         let db = root.join("history.db");
 
@@ -25,19 +34,109 @@ impl AppPaths {
 
         Self { root, blobs, db }
     }
+
+    /// 一次性临时根目录（只给路径，不创建 AppPaths），供 `--selftest` / `--seed` 使用。
+    ///
+    /// 带上 pid 与时间戳：同一台机器上并行跑多个自检也不会互相踩到同一个库。
+    pub fn temporary_root(tag: &str) -> PathBuf {
+        let unique = format!(
+            "WindowsPaste-{}-{}-{}",
+            tag,
+            std::process::id(),
+            chrono::Local::now().timestamp_millis()
+        );
+        std::env::temp_dir().join(unique)
+    }
+}
+
+/// `add()` 的结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddOutcome {
+    /// 新条目。
+    Inserted,
+    /// 同一内容已存在：已把它的时间戳刷新到当下，列表顺序随之改变。
+    Touched,
+}
+
+/// `upsert_imported()` 的结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportOutcome {
+    Inserted,
+    /// 已存在，但置顶 / 标签被合并更新了。
+    Merged,
+    /// 已存在且无变化。
+    Skipped,
+}
+
+/// 删除 `blobs/` 目录里没有任何记录引用的文件。
+///
+/// 用于自愈历史遗留的泄漏（`clear()` 曾经把待删列表丢掉）。
+/// 返回被清理的文件数。
+pub fn sweep_orphan_blobs(db: &Database, blobs_dir: &Path) -> usize {
+    let referenced = match db.referenced_blobs() {
+        Ok(set) => set,
+        Err(_) => return 0,
+    };
+
+    let entries = match fs::read_dir(blobs_dir) {
+        Ok(entries) => entries,
+        Err(_) => return 0,
+    };
+
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("png") {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !referenced.contains(name) && fs::remove_file(&path).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
 }
 
 pub struct Database {
     conn: Connection,
     capacity: usize,
+    /// 该库对应的 blob 目录。
+    ///
+    /// 之前 `trim()` 里用 `AppPaths::get()` 现拼路径，一旦库被指向别处
+    /// （自检、`--data-dir`、导入到临时目录），删文件就会删错目录。
+    blobs_dir: PathBuf,
 }
 
 impl Database {
+    /// 打开数据库，blob 目录取该库所在目录下的 `blobs/`。
     pub fn open(db_path: &Path, capacity: usize) -> Result<Self> {
+        let blobs_dir = db_path
+            .parent()
+            .map(|dir| dir.join("blobs"))
+            .unwrap_or_else(|| PathBuf::from("blobs"));
+        Self::open_with_blobs(db_path, capacity, blobs_dir)
+    }
+
+    /// 显式指定 blob 目录，便于测试与 `--data-dir`。
+    pub fn open_with_blobs(db_path: &Path, capacity: usize, blobs_dir: PathBuf) -> Result<Self> {
         let conn = Connection::open(db_path)?;
-        let db = Self { conn, capacity };
+        // WAL：读写不互相阻塞。万一同一个库被第二个进程打开（例如用户从别处
+        // 拷了一份正在用的库进来），也不至于立刻报 database is locked。
+        let _ = conn.pragma_update(None, "journal_mode", "WAL");
+        let _ = conn.pragma_update(None, "synchronous", "NORMAL");
+        let db = Self {
+            conn,
+            capacity,
+            blobs_dir,
+        };
         db.init()?;
         Ok(db)
+    }
+
+    pub fn blobs_dir(&self) -> &Path {
+        &self.blobs_dir
     }
 
     fn init(&self) -> Result<()> {
@@ -61,20 +160,35 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_most_recent_hash(&self) -> Option<String> {
+    /// 按 hash 查已有条目的 id。导入与去重都靠它。
+    ///
+    /// 这也是 `IX_ClipboardItems_Hash` 这个索引存在的意义——
+    /// 之前建了却没被任何查询用上。
+    pub fn find_id_by_hash(&self, hash: &str) -> Result<Option<i64>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT Hash FROM ClipboardItems ORDER BY CreatedAt DESC, Id DESC LIMIT 1")
-            .ok()?;
-        stmt.query_row([], |row| row.get(0)).ok()
+            .prepare("SELECT Id FROM ClipboardItems WHERE Hash = ?1 LIMIT 1")?;
+        stmt.query_row(params![hash], |row| row.get(0))
+            .optional()
     }
 
-    pub fn add(&mut self, item: &mut ClipboardItem) -> Result<bool> {
-        // De-duplication check: if newest entry has identical hash, skip
-        if let Some(recent_hash) = self.get_most_recent_hash() {
-            if recent_hash == item.hash {
-                return Ok(false);
-            }
+    /// 写入一条新记录。
+    ///
+    /// 返回 `AddOutcome`：
+    /// - `Inserted`：新条目
+    /// - `Touched`：同一内容已经在历史里，把它的时间戳刷新到当下（"提到最前"）
+    ///
+    /// 为什么重复项要"提到最前"而不是忽略：用户复制 A、B、再复制 A 时，
+    /// 若只是忽略，列表顶部仍然是 B —— 与他刚才的操作对不上。
+    /// 同时这也让"同一次复制触发两三次 WM_CLIPBOARDUPDATE"天然幂等。
+    pub fn add(&mut self, item: &mut ClipboardItem) -> Result<AddOutcome> {
+        if let Some(existing_id) = self.find_id_by_hash(&item.hash)? {
+            self.conn.execute(
+                "UPDATE ClipboardItems SET CreatedAt = ?1 WHERE Id = ?2",
+                params![item.created_at.to_rfc3339(), existing_id],
+            )?;
+            item.id = existing_id;
+            return Ok(AddOutcome::Touched);
         }
 
         self.conn.execute(
@@ -93,7 +207,59 @@ impl Database {
 
         item.id = self.conn.last_insert_rowid();
         self.trim()?;
-        Ok(true)
+        Ok(AddOutcome::Inserted)
+    }
+
+    /// 导入专用：按 hash 幂等写入，已存在时只更新用户产出的元数据。
+    ///
+    /// 不碰 `CreatedAt`（保留原始时间），也不碰 `Content`——同一个 hash
+    /// 意味着内容相同，覆盖没有意义却可能引入差异。
+    pub fn upsert_imported(&mut self, item: &mut ClipboardItem) -> Result<ImportOutcome> {
+        if let Some(existing_id) = self.find_id_by_hash(&item.hash)? {
+            let (current_pinned, current_tag): (i32, Option<String>) = self
+                .conn
+                .query_row(
+                    "SELECT Pinned, Tag FROM ClipboardItems WHERE Id = ?1",
+                    params![existing_id],
+                    |row| Ok((row.get(0)?, row.get(1).ok())),
+                )?;
+
+            // 合并规则：置顶取并集，标签只在本地为空时补上——都不覆盖用户已有的选择
+            let next_pinned = current_pinned != 0 || item.pinned;
+            let next_tag: Option<String> = match current_tag.as_deref() {
+                Some(existing) if !existing.is_empty() => Some(existing.to_string()),
+                _ => item.tag.clone(),
+            };
+
+            item.id = existing_id;
+
+            if next_pinned == (current_pinned != 0) && next_tag == current_tag {
+                return Ok(ImportOutcome::Skipped);
+            }
+
+            self.conn.execute(
+                "UPDATE ClipboardItems SET Pinned = ?1, Tag = ?2 WHERE Id = ?3",
+                params![if next_pinned { 1 } else { 0 }, next_tag, existing_id],
+            )?;
+            return Ok(ImportOutcome::Merged);
+        }
+
+        self.conn.execute(
+            "INSERT INTO ClipboardItems (Type, Content, BlobPath, Hash, CreatedAt, Pinned, Tag)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                item.item_type.to_i32(),
+                item.content,
+                item.blob_path,
+                item.hash,
+                item.created_at.to_rfc3339(),
+                if item.pinned { 1 } else { 0 },
+                item.tag,
+            ],
+        )?;
+        item.id = self.conn.last_insert_rowid();
+        self.trim()?;
+        Ok(ImportOutcome::Inserted)
     }
 
     pub fn get_all(&self) -> Result<Vec<ClipboardItem>> {
@@ -186,14 +352,29 @@ impl Database {
         Ok(())
     }
 
-    pub fn delete(&self, id: i64) -> Result<()> {
+    /// 删除一行，返回它的 blob 文件名（如果有），由调用方负责删文件。
+    pub fn delete(&self, id: i64) -> Result<Option<String>> {
+        // 行可能不存在：用 optional() 把 "no rows" 转成 None 而不是错误
+        let blob: Option<Option<String>> = self
+            .conn
+            .query_row(
+                "SELECT BlobPath FROM ClipboardItems WHERE Id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let blob = blob.flatten();
+
         self.conn.execute(
             "DELETE FROM ClipboardItems WHERE Id = ?1",
             params![id],
         )?;
-        Ok(())
+        Ok(blob)
     }
 
+    /// 清空全部行，返回所有待删的 blob 文件名。
+    ///
+    /// 调用方<b>必须</b>用返回值去删文件，否则 `blobs/` 会变成永不回收的垃圾桶。
     pub fn clear(&self) -> Result<Vec<String>> {
         let blobs = {
             let mut stmt = self.conn.prepare(
@@ -205,6 +386,15 @@ impl Database {
 
         self.conn.execute("DELETE FROM ClipboardItems", [])?;
         Ok(blobs)
+    }
+
+    /// 列出数据库里仍在引用的所有 blob 文件名。
+    pub fn referenced_blobs(&self) -> Result<HashSet<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT BlobPath FROM ClipboardItems WHERE BlobPath IS NOT NULL")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        Ok(rows.flatten().collect())
     }
 
     pub fn get_total_count(&self) -> Result<usize> {
@@ -232,9 +422,8 @@ impl Database {
         for (id, blob) in stale {
             let _ = self.delete(id);
             if let Some(b) = blob {
-                let paths = AppPaths::get();
-                let blob_file = paths.blobs.join(b);
-                let _ = fs::remove_file(blob_file);
+                // 用本库自己的 blob 目录，而不是全局 AppPaths
+                let _ = fs::remove_file(self.blobs_dir.join(b));
             }
         }
         Ok(())
@@ -290,13 +479,28 @@ mod tests {
             pinned: false,
             tag: None,
         };
-        assert!(db.add(&mut item1).unwrap());
+        assert_eq!(db.add(&mut item1).unwrap(), AddOutcome::Inserted);
         assert_eq!(db.get_total_count().unwrap(), 1);
 
-        // 重复哈希防抖：相同 hash 不重复入库
+        // 重复哈希防抖：相同 hash 不重复入库，而是刷新最新一条的时间戳
         let mut item1_dup = item1.clone();
-        assert!(!db.add(&mut item1_dup).unwrap());
+        assert_eq!(db.add(&mut item1_dup).unwrap(), AddOutcome::Touched);
         assert_eq!(db.get_total_count().unwrap(), 1);
+
+        // 复制 A → B → A：A 不应产生副本，而是被"提到最前"
+        let mut other = item1.clone();
+        other.hash = "hash_other".to_string();
+        other.content = "Another".to_string();
+        db.add(&mut other).unwrap();
+        let mut item1_again = item1.clone();
+        item1_again.created_at = Local::now() + chrono::Duration::seconds(5);
+        assert_eq!(db.add(&mut item1_again).unwrap(), AddOutcome::Touched);
+        assert_eq!(db.get_total_count().unwrap(), 2, "不应产生幽灵副本");
+        assert_eq!(
+            db.get_all().unwrap()[0].id,
+            item1.id,
+            "刚复制的内容必须回到列表首位"
+        );
 
         // 搜索测试
         let search_res = db.search("Rust").unwrap();
@@ -308,8 +512,9 @@ mod tests {
         let all = db.get_all().unwrap();
         assert!(all[0].pinned);
 
+        // 此时库里还有 "Another" 一条，删掉 item1 后应剩 1
         db.delete(item1.id).unwrap();
-        assert_eq!(db.get_total_count().unwrap(), 0);
+        assert_eq!(db.get_total_count().unwrap(), 1);
 
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -409,5 +614,111 @@ mod tests {
         assert!(unpinned_count <= 3);
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    fn sample(hash: &str, content: &str, pinned: bool, tag: Option<&str>) -> ClipboardItem {
+        ClipboardItem {
+            id: 0,
+            item_type: ClipboardItemType::Text,
+            content: content.to_string(),
+            blob_path: None,
+            hash: hash.to_string(),
+            created_at: Local::now(),
+            pinned,
+            tag: tag.map(|t| t.to_string()),
+        }
+    }
+
+    #[test]
+    fn test_import_is_idempotent() {
+        let temp_dir = std::env::temp_dir().join(format!("test_wp_import_{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let mut db = Database::open(&temp_dir.join("test.db"), 100).expect("open db");
+
+        let mut first = sample("imp1", "imported text", false, Some("代码"));
+        assert_eq!(db.upsert_imported(&mut first).unwrap(), ImportOutcome::Inserted);
+
+        // 同一个包再导一次：内容一致、置顶一致、标签一致 → 跳过
+        let mut again = sample("imp1", "imported text", false, Some("代码"));
+        assert_eq!(db.upsert_imported(&mut again).unwrap(), ImportOutcome::Skipped);
+        assert_eq!(db.get_total_count().unwrap(), 1);
+
+        // 新包里这条被置顶了 → 合并置顶，但不重复插入
+        let mut pinned_version = sample("imp1", "imported text", true, Some("代码"));
+        assert_eq!(
+            db.upsert_imported(&mut pinned_version).unwrap(),
+            ImportOutcome::Merged
+        );
+        assert_eq!(db.get_total_count().unwrap(), 1);
+        assert!(db.get_all().unwrap()[0].pinned);
+    }
+
+    #[test]
+    fn test_import_does_not_overwrite_local_tag() {
+        let temp_dir = std::env::temp_dir().join(format!("test_wp_imp_tag_{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let mut db = Database::open(&temp_dir.join("test.db"), 100).expect("open db");
+
+        let mut local = sample("imp2", "shared", false, Some("工作"));
+        db.upsert_imported(&mut local).unwrap();
+
+        // 导入文件里带的是另一个标签——本地已有分类时不应该被覆盖
+        let mut incoming = sample("imp2", "shared", false, Some("个人"));
+        assert_eq!(db.upsert_imported(&mut incoming).unwrap(), ImportOutcome::Skipped);
+        assert_eq!(
+            db.get_all().unwrap()[0].tag.as_deref(),
+            Some("工作"),
+            "本地已有的分类必须保留"
+        );
+    }
+
+    #[test]
+    fn test_delete_and_clear_release_blobs() {
+        let root = std::env::temp_dir().join(format!("test_wp_blobs_{}", std::process::id()));
+        let paths = AppPaths::at(root.clone());
+        let mut db = Database::open(&paths.db, 100).expect("open db");
+        // open() 会把 blob 目录推导成 <db 所在目录>/blobs，正好就是 paths.blobs
+        assert_eq!(db.blobs_dir(), paths.blobs);
+
+        // 造两个 blob 文件，一条记录引用其中第一个
+        fs::write(paths.blobs.join("a.png"), b"x").unwrap();
+        fs::write(paths.blobs.join("orphan.png"), b"y").unwrap();
+
+        let mut item = sample("img1", "1 x 1 image", false, None);
+        item.blob_path = Some("a.png".to_string());
+        db.add(&mut item).unwrap();
+
+        // 删除应把文件名交还给调用方
+        let released = db.delete(item.id).unwrap();
+        assert_eq!(released.as_deref(), Some("a.png"));
+
+        // 孤儿扫描：数据库已无引用，a.png 与 orphan.png 都应被清掉
+        let removed = sweep_orphan_blobs(&db, &paths.blobs);
+        assert_eq!(removed, 2);
+        assert!(!paths.blobs.join("a.png").exists());
+        assert!(!paths.blobs.join("orphan.png").exists());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_clear_returns_all_blob_paths() {
+        let root = std::env::temp_dir().join(format!("test_wp_clear_{}", std::process::id()));
+        let paths = AppPaths::at(root.clone());
+        let mut db = Database::open(&paths.db, 100).expect("open db");
+        // AppPaths::at 会建好 blobs 目录，open() 推导出的路径应与之一致
+        assert_eq!(db.blobs_dir(), paths.blobs);
+
+        for (i, name) in ["p.png", "q.png"].iter().enumerate() {
+            let mut item = sample(&format!("img{}", i), "image", false, None);
+            item.blob_path = Some((*name).to_string());
+            db.add(&mut item).unwrap();
+        }
+
+        let released = db.clear().unwrap();
+        assert_eq!(released.len(), 2, "clear() 必须把待删的文件名全部交出来");
+        assert_eq!(db.get_total_count().unwrap(), 0);
+
+        let _ = fs::remove_dir_all(&root);
     }
 }
