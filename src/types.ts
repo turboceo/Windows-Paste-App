@@ -10,8 +10,8 @@ export interface ClipboardItem {
   /** Display-ready preview line. */
   preview: string
   /**
-   * 图片条目的 blob 文件名（如 `abc123….png`），不是 URL。
-   * 由 `assets.ts` 的 `blobUrl()` 拼成 asset 协议地址后交给 `<img>`。
+   * 图片条目的**缩略图 data URL**（`data:image/png;base64,...`）。
+   * 由后端解码原图、缩放到 480px 后内联，可以直接交给 `<img src>`。
    */
   imageUrl: string | null
   /** Preformatted timestamp for the card footer. */

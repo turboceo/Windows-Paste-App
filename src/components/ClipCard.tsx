@@ -1,11 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { blobUrl } from '../assets'
 import type { ClipboardItem } from '../types'
 
 interface ClipCardProps {
   item: ClipboardItem
-  /** blob 目录绝对路径，由宿主下发；为空时图片退化成占位 */
-  blobsRoot: string | null
   selected: boolean
   onSelect: (item: ClipboardItem) => void
   onPaste: (item: ClipboardItem) => void
@@ -17,7 +14,6 @@ interface ClipCardProps {
 /** One history card, styled after Paste.app. */
 export default function ClipCard({
   item,
-  blobsRoot,
   selected,
   onSelect,
   onPaste,
@@ -57,16 +53,13 @@ export default function ClipCard({
       .map((fullPath) => ({ name: fullPath.split(/[\\/]/).pop() || fullPath, fullPath }))
   }, [item.type, item.content])
 
-  // 后端只给 blob 文件名，这里拼成 asset URL；拿不到就退回文字预览
-  const imageSrc = useMemo(
-    () => (item.type === 'Image' ? blobUrl(blobsRoot, item.imageUrl) : null),
-    [item.type, item.imageUrl, blobsRoot],
-  )
+  // 后端直接给缩略图的 data URL，前端不需要再拼路径
+  const imageSrc = item.type === 'Image' ? item.imageUrl : null
 
   // 加载失败后不要一直重试：记住这张卡已经失败过，直接显示占位
   const [imageFailed, setImageFailed] = useState(false)
 
-  // 路径变化时重置失败状态（例如 blobsRoot 晚到）
+  // 缩略图换了（重新推送过）就重置失败状态
   useEffect(() => {
     setImageFailed(false)
   }, [imageSrc])

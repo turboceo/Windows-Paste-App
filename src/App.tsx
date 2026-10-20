@@ -22,8 +22,6 @@ export default function App() {
   const [hotkeyLabel, setHotkeyLabel] = useState('')
   const [isMaximized, setIsMaximized] = useState(false)
   const [totalCount, setTotalCount] = useState(0)
-  /** blob 目录绝对路径，图片卡片用它拼 asset URL */
-  const [blobsRoot, setBlobsRoot] = useState<string | null>(null)
 
   // 分类 Tag 状态
   const [allTags, setAllTags] = useState<string[]>([])
@@ -116,9 +114,8 @@ export default function App() {
           }
           break
         case 'paths':
-          // 用 state 而不是模块变量：宿主下发路径时必须触发一次重渲染，
-          // 否则卡片停在图片占位状态。
-          setBlobsRoot(message.blobsRoot)
+          // 缩略图已由后端直接内嵌为 data URL，不再需要 blob 目录路径。
+          // 保留这个分支只是为了兼容旧版宿主，收到时直接忽略。
           break
         case 'reset':
           // 宿主在唤出面板时清空搜索与分类，前端必须跟着归零
@@ -430,7 +427,6 @@ export default function App() {
         <div className="list-area">
           <CardGrid
             items={items}
-            blobsRoot={blobsRoot}
             selectedId={selectedId}
             onSelect={onSelect}
             onPaste={onPaste}

@@ -82,7 +82,11 @@ pub fn emit_push(app: &AppHandle, payload: Value) {
 }
 
 pub fn push_items(app: &AppHandle, state: &AppState) {
-    let items: Vec<ClipItemDto> = state.items.iter().map(ClipItemDto::from_item).collect();
+    let items: Vec<ClipItemDto> = state
+        .items
+        .iter()
+        .map(|item| ClipItemDto::from_item(item, &state.paths.blobs))
+        .collect();
 
     emit_push(
         app,
@@ -154,7 +158,8 @@ pub fn dispatch(app: AppHandle, state: State<'_, SharedState>, req: HostRequest)
             let mut guard = lock_mut(&state);
             // 删行的同时把图片文件一起删掉，否则 blobs/ 会无限增长
             if let Ok(Some(blob)) = guard.db.delete(item_id) {
-                let _ = std::fs::remove_file(guard.paths.blobs.join(blob));
+                let _ = std::fs::remove_file(guard.paths.blobs.join(&blob));
+                crate::state::forget_thumbnails(&[blob]);
             }
             guard.reload();
             push_items(&app, &guard);
@@ -234,6 +239,7 @@ pub fn dispatch(app: AppHandle, state: State<'_, SharedState>, req: HostRequest)
             let removed_entries = guard.total_count;
             let released = guard.db.clear().unwrap_or_default();
             crate::remove_blobs(&guard.paths.blobs, &released);
+            crate::state::forget_thumbnails(&released);
             guard.reload();
             push_items(&app, &guard);
             push_selection(&app, &guard);
