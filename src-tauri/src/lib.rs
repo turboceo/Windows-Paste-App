@@ -17,9 +17,7 @@ pub mod state;
 pub mod tray;
 pub mod window_util;
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
 
 use tauri::{Manager, WindowEvent};
 
@@ -30,11 +28,6 @@ use crate::single_instance::InstanceGuard;
 use crate::state::{AppState, SharedState};
 
 pub use crate::state::HISTORY_CAPACITY;
-
-/// Tracks whether the panel has been shown at least once. Blur-to-hide is
-/// suppressed until the first real summon so startup focus churn is ignored.
-#[derive(Default)]
-pub struct BlurGuard(pub AtomicBool);
 
 /// 单实例互斥量的持有者：活到进程退出。
 static INSTANCE_GUARD: std::sync::OnceLock<InstanceGuard> = std::sync::OnceLock::new();
@@ -116,7 +109,6 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(state)
-        .manage(BlurGuard::default())
         .invoke_handler(tauri::generate_handler![commands::dispatch])
         .setup(move |app| {
             let handle: tauri::AppHandle = app.handle().clone();
@@ -128,7 +120,6 @@ pub fn run() {
                 window_util::apply_window_icon(&window);
                 if show_on_start {
                     window_util::center_on_cursor(&window);
-                    window.state::<BlurGuard>().0.store(true, Ordering::SeqCst);
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
@@ -255,45 +246,33 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(move |window, event| {
-            if let WindowEvent::Focused(focused) = event {
-                if !focused && !is_selftest {
-                    // Only dismiss after the panel has actually been summoned;
-                    // otherwise the startup focus transitions would close it.
-                    let guard = window.state::<BlurGuard>();
-                    if guard.0.load(Ordering::SeqCst) {
-                        // 刚显示出来的那一小段时间里忽略失焦。
-                        //
-                        // `show()` 之后窗口要过几十毫秒才真正拿到焦点，
-                        // 这期间系统可能先报一次 Focused(false)。
-                        // 不挡掉的话，面板会"闪一下就没了"，观感跟假死一样。
-                        if window_util::recently_shown_within(Duration::from_millis(150)) {
-                            return;
-                        }
-                        let _ = window.hide();
-                    }
-                }
-            }
-        })
+        // 面板不再监听窗口失焦事件。
+        //
+        // 之前这里是"一失去焦点就 hide()"，本意是像 Paste 那样点到别处就收起。
+        // 实际用起来很糟：右键菜单、分类子菜单、导入确认框都可能让焦点短暂
+        // 离开，面板连同正在操作的菜单一起消失；在别的窗口里复制东西再按热键，
+        // 也常因焦点状态错乱而唤不出来。
+        //
+        // 现在只有三种方式收起面板：Esc、再按一次热键（或点托盘）、
+        // 以及选中记录后自动粘贴。
         .run(tauri::generate_context!())
         .expect("error while running Windows Paste");
 }
 
 /// Summons or dismisses the panel. Used by the global hotkey and the tray.
 ///
-/// 判定"要不要隐藏"时不只看 `is_visible()`。窗口可能处于一种别扭的中间态：
-/// 逻辑上是可见的，但实际上被别的窗口完全遮住、或者焦点早已丢失——
-/// 这时若盲目 `hide()`，用户按热键看到的就是"毫无反应"，正是"假死"的观感。
-/// 所以只在**面板确实在前台**时才隐藏，否则一律重新显示并抢焦点。
+/// 面板可见时，热键就是收起它——不看焦点。
+///
+/// 之前这里要求"可见**且**在前台"才隐藏，那是为了对冲"失焦自动隐藏"遗留的
+/// 状态错乱。现在失焦不再自动隐藏，用户按热键时窗口通常正处于失焦状态
+/// （他已经点到别处去了），若还要求前台，热键就永远收不起来，
+/// 只能按 Esc。所以判定只看可见性。
 pub fn toggle_panel(app: &tauri::AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
 
-    let visible = window.is_visible().unwrap_or(false);
-    let focused = window.is_focused().unwrap_or(false);
-
-    if visible && focused {
+    if window.is_visible().unwrap_or(false) {
         let _ = window.hide();
         return;
     }
@@ -327,10 +306,7 @@ pub fn show_panel(app: &tauri::AppHandle) {
     // 主线程就会在窗口显示之前被挡住 —— 用户看到的就是"按了热键没反应"。
     // 先 show 再刷新，最坏情况也只是列表晚几十毫秒更新，而不是面板不出来。
     window_util::center_on_cursor(&window);
-    window.state::<BlurGuard>().0.store(true, Ordering::SeqCst);
     let _ = window.show();
-    // 记下显示时刻：接下来 150ms 内的失焦事件视为"还没真正拿到焦点"，忽略
-    window_util::mark_shown();
     let _ = window.set_focus();
 
     if let Some(state) = app.try_state::<SharedState>() {

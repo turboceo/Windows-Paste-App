@@ -1,44 +1,7 @@
 //! Small Win32 window helpers: square corners and cursor-monitor centering.
 
-use std::sync::atomic::Ordering;
-use std::time::{Duration, Instant};
-
 use tauri::{PhysicalPosition, PhysicalSize, WebviewWindow};
 
-// 记录面板最近一次被显示的时刻，用于挡掉 `show()` 之后那一小段
-// "还没真正拿到焦点、系统却先报失焦"的窗口。否则面板会闪一下就消失，
-// 观感与假死无异。
-//
-// 用两个原子量而不是 `Mutex<Option<Instant>>`：后者没法做 `static` 初始化，
-// 前者还省掉了一把锁——这个函数会在窗口事件回调里被频繁调用。
-
-/// 进程启动的参考点，`OnceLock` 只写一次。
-fn start_instant() -> &'static Instant {
-    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
-    START.get_or_init(Instant::now)
-}
-
-/// 上次显示面板的时刻，以"距进程启动的毫秒数"表示；0 表示从未显示过。
-static LAST_SHOWN_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-fn now_millis() -> u64 {
-    start_instant().elapsed().as_millis() as u64
-}
-
-/// 记录"刚刚显示了一次面板"。必须在 `show()` 之后立刻调用。
-pub fn mark_shown() {
-    // +1 是为了避开"恰好 0ms"这个哨兵值
-    LAST_SHOWN_MS.store(now_millis() + 1, Ordering::SeqCst);
-}
-
-/// 面板是否在 `window` 时长之内刚被显示过。
-pub fn recently_shown_within(window: Duration) -> bool {
-    let last = LAST_SHOWN_MS.load(Ordering::SeqCst);
-    if last == 0 {
-        return false;
-    }
-    now_millis().saturating_sub(last.saturating_sub(1)) < window.as_millis() as u64
-}
 use windows_sys::Win32::Foundation::{HWND, POINT};
 use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE};
 use windows_sys::Win32::Graphics::Gdi::{
