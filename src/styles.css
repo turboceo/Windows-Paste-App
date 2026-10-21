@@ -1,6 +1,9 @@
 :root {
   /* Panel background */
-  --panel-bg: rgba(246, 248, 251, 0.94);
+  /* 亚克力已关闭（见 window_util.rs 的 ACRYLIC_ENABLED），面板不再靠 DWM
+     模糊提供底色，所以这里用接近不透明的值，避免窗口透出桌面显得脏。
+     重新打开亚克力时可以调回 0.94。 */
+  --panel-bg: rgba(246, 248, 251, 0.99);
   --panel-border: rgba(0, 0, 0, 0.08);
   --panel-shadow: 0 24px 60px -12px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(0, 0, 0, 0.06);
 
@@ -52,7 +55,9 @@ body {
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
   color: var(--text-main);
-  background: transparent;
+  /* 窗口不再透明（见 tauri.conf.json），这里给一个与面板一致的实底，
+     避免 WebView 在首帧、或面板尚未铺满时露出白底。 */
+  background: var(--panel-bg);
   user-select: none;
   cursor: default;
   -webkit-font-smoothing: antialiased;
@@ -103,8 +108,24 @@ body {
   box-shadow: var(--panel-shadow);
   border-radius: var(--radius-panel);
   overflow: hidden;
-  backdrop-filter: blur(28px) saturate(180%);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  /*
+   * 注意：这里不能加 transform / will-change: transform。
+   *
+   * 那会把这个元素变成"包含块"，让内部的 position: fixed 元素
+   * （右键菜单、确认框、toast）从相对视口定位变成相对面板定位。
+   * 而这些组件的坐标来自鼠标的 clientX/clientY，一旦基准变了就会整体错位。
+   */
+  /*
+   * 这里刻意**不用** backdrop-filter。
+   *
+   * 毛玻璃效果已经由 DWM 的亚克力（window_util::polish → apply_acrylic）提供了，
+   * 再叠一层 CSS backdrop-filter 等于对同一块像素做两遍模糊，而且第二遍发生在
+   * WebView 的合成器里——它要先拷贝离屏纹理再卷积。
+   *
+   * 拖动窗口时，窗口背后的内容每一帧都在变，两层模糊就都得每帧重算，
+   * 帧率会掉到 20-30。去掉这一层，效果肉眼几乎无差别，
+   * 但模糊全部由 DWM 原生完成，这是 Windows 上开销最低的路径。
+   */
 }
 
 .list-area {
@@ -154,7 +175,8 @@ body {
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   user-select: none;
   flex: 0 0 38px;
-  backdrop-filter: blur(10px);
+  /* 不在这里做 backdrop-filter：它模糊的是已经半透明、且由 DWM 亚克力
+     提供底色的面板内部，视觉收益接近零，但每帧都要额外合成一次。 */
 }
 
 .brand {
@@ -625,7 +647,7 @@ body {
   padding: 12px 18px;
   background: rgba(255, 255, 255, 0.7);
   border-top: 1px solid rgba(0, 0, 0, 0.06);
-  backdrop-filter: blur(10px);
+  /* 同上：面板内部不需要再模糊一次 */
 }
 
 .search {

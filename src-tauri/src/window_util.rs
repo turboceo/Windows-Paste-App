@@ -91,8 +91,18 @@ pub fn apply_window_icon(window: &WebviewWindow) {
     }
 }
 
-/// Applies the native window frame touches: square corners plus an acrylic
-/// backdrop so the panel reads like a floating Paste.app surface.
+/// 是否启用 DWM 亚克力。
+///
+/// 亚克力会让 DWM 对窗口**背后**的屏幕内容实时采样并模糊；窗口每移动一个像素，
+/// 这片区域就得重新采样一次。它是 Windows 上拖动窗口掉帧最常见的原因，
+/// 尤其在中低端显卡或副屏上。
+///
+/// 关掉之后面板回退成 `--panel-bg` 这种接近不透明的纯色，视觉上朴素一些，
+/// 但拖动会流畅很多。需要毛玻璃观感时再打开。
+const ACRYLIC_ENABLED: bool = false;
+
+/// Applies the native window frame touches: square corners, and optionally an
+/// acrylic backdrop so the panel reads like a floating Paste.app surface.
 pub fn polish(window: &WebviewWindow) {
     let Some(hwnd) = hwnd_of(window) else {
         return;
@@ -107,9 +117,11 @@ pub fn polish(window: &WebviewWindow) {
             std::mem::size_of::<i32>() as u32,
         );
 
-        // Acrylic blur behind the transparent webview. Failures are non-fatal:
-        // the panel still renders with its own opaque-ish background.
-        let _ = window_vibrancy::apply_acrylic(window, Some((246, 248, 251, 180)));
+        if ACRYLIC_ENABLED {
+            // Acrylic blur behind the transparent webview. Failures are non-fatal:
+            // the panel still renders with its own opaque-ish background.
+            let _ = window_vibrancy::apply_acrylic(window, Some((246, 248, 251, 180)));
+        }
     }
 }
 
