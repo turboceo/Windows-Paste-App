@@ -960,6 +960,24 @@ body {
   padding: 4px;
 }
 
+/*
+ * 用一块透明区域把"主菜单与子菜单之间的 4px 空隙"补上。
+ *
+ * 那 4px 来自 margin-left，不属于任何元素的盒模型，鼠标斜着划过去时
+ * 命中目标会短暂变成父菜单，触发 mouseleave 导致子菜单被卸载。
+ * 这块伪元素铺在空隙上，鼠标经过时仍然算"在子菜单里"，不会离开。
+ *
+ * 视觉上完全不可见，只为命中测试而存在。
+ */
+.paste-sub-menu::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -6px;
+  width: 6px;
+}
+
 .submenu-title {
   padding: 5px 10px 3px;
   font-size: 10.5px;

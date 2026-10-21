@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipboardItem } from '../types'
 
 export interface ContextMenuState {
@@ -20,6 +20,18 @@ interface ContextMenuProps {
 
 const PRESET_TAGS = ['常用', '代码', '工作', '灵感', '重要']
 
+/**
+ * 鼠标离开"添加到分类"一行后，延迟多久收起子菜单。
+ *
+ * 用 debounce 而不是 throttle：
+ * throttle 是"首次立即执行、之后限频"，鼠标一离开就会立刻收起一次，
+ * 子菜单照样瞬间消失。这里要的是"离开后等一会儿，期间回来就取消"。
+ *
+ * 160ms 足够覆盖从主菜单斜向划入子菜单的时间（中间要穿过 4px 的间隙），
+ * 又短到不像卡顿。
+ */
+const SUBMENU_CLOSE_DELAY = 160
+
 export default function ContextMenu({
   menu,
   allTags,
@@ -34,6 +46,52 @@ export default function ContextMenu({
   const [newTagInput, setNewTagInput] = useState('')
   const menuRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  /** 收起子菜单的延时任务；鼠标回到主菜单项时要取消它 */
+  const closeTimerRef = useRef<number | null>(null)
+
+  const cancelScheduledClose = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current)
+      closeTimerRef.current = null
+    }
+  }, [])
+
+  /** 立即展开子菜单（并取消任何待执行的收起）。 */
+  const openSubMenu = () => {
+    cancelScheduledClose()
+    setShowSubMenu(true)
+  }
+
+  /**
+   * 延迟收起子菜单。
+   *
+   * 直接 `setShowSubMenu(false)` 是不行的：子菜单与主菜单项之间有 4px 的
+   * margin，鼠标斜着划过去时会先落到空隙里，`mouseleave` 当场触发，
+   * 子菜单在用户点到之前就被卸载了。等一会儿再收，给鼠标留出穿过的余量。
+   */
+  const scheduleCloseSubMenu = useCallback(() => {
+    // 正在输入新标签时绝不收起，否则输一半的标签会连同菜单一起消失
+    if (isCreatingTag) return
+    cancelScheduledClose()
+    closeTimerRef.current = window.setTimeout(() => {
+      closeTimerRef.current = null
+      setShowSubMenu(false)
+    }, SUBMENU_CLOSE_DELAY)
+  }, [isCreatingTag, cancelScheduledClose])
+
+  // 组件卸载时清掉挂起的定时器
+  useEffect(() => cancelScheduledClose, [cancelScheduledClose])
+
+  // 菜单关掉、或右键了另一张卡片时，重置子菜单与输入态。
+  //
+  // 这个组件在菜单隐藏时只是 `return null`、并不会卸载，所以 state 会留着：
+  // 不重置的话，"展开子菜单 → 关闭 → 右键另一张卡"会看到子菜单自动弹出来。
+  useEffect(() => {
+    cancelScheduledClose()
+    setShowSubMenu(false)
+    setIsCreatingTag(false)
+    setNewTagInput('')
+  }, [menu.visible, menu.item?.id, cancelScheduledClose])
 
   // 合并预设与已有的所有分类，保持去重
   const mergedTags = Array.from(new Set([...PRESET_TAGS, ...allTags])).filter(Boolean)
@@ -126,8 +184,8 @@ export default function ContextMenu({
       {/* 3. 添加到分类 / 修改分类 (展开二级菜单) */}
       <div
         className="menu-item has-submenu"
-        onMouseEnter={() => setShowSubMenu(true)}
-        onMouseLeave={() => !isCreatingTag && setShowSubMenu(false)}
+        onMouseEnter={openSubMenu}
+        onMouseLeave={scheduleCloseSubMenu}
       >
         <span className="item-glyph">&#xE8EC;</span>
         <span className="item-label">
@@ -182,6 +240,8 @@ export default function ContextMenu({
                 className="menu-item new-tag"
                 onClick={(e) => {
                   e.stopPropagation()
+                  // 进入输入态后子菜单不能再被自动收起
+                  cancelScheduledClose()
                   setIsCreatingTag(true)
                 }}
               >
