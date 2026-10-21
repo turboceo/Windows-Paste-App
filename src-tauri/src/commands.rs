@@ -55,6 +55,9 @@ pub enum HostRequest {
     FilterTag {
         tag: Option<String>,
     },
+    /// 删除一个分类标签（从所有条目上摘掉，条目保留）。
+    #[serde(rename_all = "camelCase")]
+    DeleteTag { tag: String },
     Columns { columns: i64 },
     /// 导出全部历史到指定路径；`path` 为空时用默认文件名。
     Export { path: Option<String> },
@@ -99,6 +102,8 @@ pub fn push_items(app: &AppHandle, state: &AppState) {
             "isEmpty": items.is_empty(),
             "totalCount": state.total_count,
             "allTags": state.all_tags,
+            // 每个分类的条目数，删除确认框用它说明"会影响多少条"
+            "tagCounts": state.tag_counts,
             "activeTag": state.active_tag,
         }),
     );
@@ -190,6 +195,27 @@ pub fn dispatch(app: AppHandle, state: State<'_, SharedState>, req: HostRequest)
             guard.reload();
             push_items(&app, &guard);
             push_selection(&app, &guard);
+        }
+        HostRequest::DeleteTag { tag } => {
+            let mut guard = lock_mut(&state);
+            let affected = guard.db.delete_tag(&tag).unwrap_or(0);
+
+            // 正在按这个标签筛选时要复位，否则列表会按一个已经不存在的
+            // 分类去过滤，界面直接变空，看起来像"删标签把记录也删了"。
+            if guard.active_tag.as_deref() == Some(tag.as_str()) {
+                guard.active_tag = None;
+            }
+
+            guard.reload();
+            push_items(&app, &guard);
+            push_selection(&app, &guard);
+            emit_push(
+                &app,
+                json!({
+                    "type": "toast",
+                    "message": format!("已删除分类「{}」，{} 条记录已移出该分类", tag, affected),
+                }),
+            );
         }
         HostRequest::Columns { columns } => {
             let mut guard = lock_mut(&state);

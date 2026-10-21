@@ -193,6 +193,20 @@ body {
   color: #1d4ed8;
 }
 
+/* 版本号：刻意低调，不抢计数徽章的注意力 */
+.version-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: 'Cascadia Mono', 'Consolas', ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-dim);
+  letter-spacing: 0.01em;
+  user-select: text;
+  cursor: default;
+  opacity: 0.8;
+}
+
 .drag-region {
   flex: 1 1 auto;
   height: 100%;
@@ -1385,6 +1399,11 @@ body {
   .count-badge.filtering {
     background: rgba(122, 174, 255, 0.2);
     color: #a8c8ff;
+  }
+
+  .version-badge {
+    color: var(--text-dim);
+    opacity: 0.9;
   }
 
   .window-control-btn:hover {

@@ -54,6 +54,7 @@ export type HostRequest =
   | { type: 'togglePin'; itemId: number }
   | { type: 'setTag'; itemId: number; tag: string | null }
   | { type: 'filterTag'; tag: string | null }
+  | { type: 'deleteTag'; tag: string }
   | { type: 'columns'; columns: number }
   | { type: 'export'; path?: string | null }
   | { type: 'previewImport'; path: string }
@@ -76,6 +77,8 @@ export type HostPush =
       isEmpty: boolean
       totalCount?: number
       allTags?: string[]
+      /** 每个分类下的条目数，用于删除确认框展示影响范围 */
+      tagCounts?: Record<string, number>
       activeTag?: string | null
     }
   | { type: 'selection'; selection: SelectionState }

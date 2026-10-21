@@ -344,6 +344,48 @@ impl Database {
         Ok(rows.flatten().collect())
     }
 
+    /// 统计某个分类下有多少条记录。确认框要用它告诉用户影响范围。
+    pub fn count_by_tag(&self, tag: &str) -> Result<usize> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM ClipboardItems WHERE Tag = ?1",
+            params![tag],
+            |row| row.get(0),
+        )?;
+        Ok(count as usize)
+    }
+
+    /// 一次查出所有分类及各自的条目数。
+    ///
+    /// 比逐个 `count_by_tag` 少一轮 N+1 查询；`reload()` 每次都要用它。
+    pub fn get_tag_counts(&self) -> Result<std::collections::BTreeMap<String, usize>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT Tag, COUNT(*) FROM ClipboardItems
+             WHERE Tag IS NOT NULL AND Tag != ''
+             GROUP BY Tag",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let tag: String = row.get(0)?;
+            let count: i64 = row.get(1)?;
+            Ok((tag, count as usize))
+        })?;
+        Ok(rows.flatten().collect())
+    }
+
+    /// 删除一个分类：把该标签从所有条目上摘掉，条目本身保留。
+    ///
+    /// 这里没有独立的 Tags 表——标签是条目上的一个字符串字段，
+    /// 由 `get_all_tags()` 汇总出来的。所以"删除分类"的语义就是
+    /// "让这个字符串不再出现在任何条目上"，最后一个引用消失时标签自然消失。
+    ///
+    /// 返回受影响的条目数。
+    pub fn delete_tag(&self, tag: &str) -> Result<usize> {
+        let affected = self.conn.execute(
+            "UPDATE ClipboardItems SET Tag = NULL WHERE Tag = ?1",
+            params![tag],
+        )?;
+        Ok(affected)
+    }
+
     pub fn set_pinned(&self, id: i64, pinned: bool) -> Result<()> {
         self.conn.execute(
             "UPDATE ClipboardItems SET Pinned = ?1 WHERE Id = ?2",
@@ -565,6 +607,38 @@ mod tests {
         // 清理 Tag
         db.set_tag(item1.id, None).unwrap();
         assert!(db.get_all_tags().unwrap().is_empty());
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_delete_tag_removes_tag_but_keeps_items() {
+        let temp_dir = std::env::temp_dir().join(format!("test_wp_deltag_{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let mut db = Database::open(&temp_dir.join("test.db"), 100).expect("open db");
+
+        let mut a = sample("dt1", "first", false, Some("代码"));
+        let mut b = sample("dt2", "second", false, Some("代码"));
+        let mut c = sample("dt3", "third", false, Some("工作"));
+        db.add(&mut a).unwrap();
+        db.add(&mut b).unwrap();
+        db.add(&mut c).unwrap();
+
+        assert_eq!(db.count_by_tag("代码").unwrap(), 2);
+        assert_eq!(db.get_all_tags().unwrap(), vec!["代码".to_string(), "工作".to_string()]);
+
+        let affected = db.delete_tag("代码").unwrap();
+        assert_eq!(affected, 2, "应报告受影响的条目数");
+
+        // 条目本身必须保留，只是失去分类
+        assert_eq!(db.get_total_count().unwrap(), 3, "删分类不能删记录");
+        assert_eq!(db.get_all_tags().unwrap(), vec!["工作".to_string()]);
+        assert_eq!(db.count_by_tag("代码").unwrap(), 0);
+
+        // 记录内容不受影响
+        let all = db.get_all().unwrap();
+        assert!(all.iter().any(|i| i.content == "first" && i.tag.is_none()));
+        assert!(all.iter().any(|i| i.content == "third" && i.tag.as_deref() == Some("工作")));
 
         let _ = fs::remove_dir_all(&temp_dir);
     }

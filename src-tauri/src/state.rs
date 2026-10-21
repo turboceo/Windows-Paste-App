@@ -19,6 +19,8 @@ pub struct AppState {
     pub search_text: String,
     pub active_tag: Option<String>,
     pub all_tags: Vec<String>,
+    /// 每个分类下的条目数，供删除确认框展示影响范围。
+    pub tag_counts: std::collections::BTreeMap<String, usize>,
     pub columns: usize,
     /// Foreground window captured right before the panel was summoned, so the
     /// simulated Ctrl+V lands in the app the user was actually using.
@@ -31,6 +33,7 @@ impl AppState {
             .expect("open sqlite database");
         let total_count = db.get_total_count().unwrap_or(0);
         let all_tags = db.get_all_tags().unwrap_or_default();
+        let tag_counts = db.get_tag_counts().unwrap_or_default();
         let items = db.get_all().unwrap_or_default();
         let selected_id = items.first().map(|i| i.id);
 
@@ -43,6 +46,7 @@ impl AppState {
             search_text: String::new(),
             active_tag: None,
             all_tags,
+            tag_counts,
             columns: 4,
             last_target_hwnd: 0,
         }
@@ -51,6 +55,8 @@ impl AppState {
     pub fn reload(&mut self) {
         self.total_count = self.db.get_total_count().unwrap_or(0);
         self.all_tags = self.db.get_all_tags().unwrap_or_default();
+        // 每个分类下有多少条：删除确认框要用它告诉用户影响范围
+        self.tag_counts = self.db.get_tag_counts().unwrap_or_default();
         self.items = self
             .db
             .get_filtered(&self.search_text, self.active_tag.as_deref())

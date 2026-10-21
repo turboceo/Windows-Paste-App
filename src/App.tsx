@@ -36,6 +36,7 @@ export default function App() {
 
   // 分类 Tag 状态
   const [allTags, setAllTags] = useState<string[]>([])
+  const [tagCounts, setTagCounts] = useState<Record<string, number>>({})
   const [activeTag, setActiveTag] = useState<string | null>(null)
 
   // toast 与导入确认
@@ -48,6 +49,8 @@ export default function App() {
   } | null>(null)
   /** 清空历史是不可撤销的破坏性操作，必须先确认 */
   const [pendingClear, setPendingClear] = useState(false)
+  /** 待删除的分类标签；非空时弹出确认框 */
+  const [pendingTagDelete, setPendingTagDelete] = useState<string | null>(null)
 
   // 右键上下文菜单状态
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
@@ -98,6 +101,9 @@ export default function App() {
           }
           if (Array.isArray(message.allTags)) {
             setAllTags(message.allTags)
+          }
+          if (message.tagCounts) {
+            setTagCounts(message.tagCounts)
           }
           if (message.activeTag !== undefined) {
             setActiveTag(message.activeTag ?? null)
@@ -236,6 +242,12 @@ export default function App() {
     setPendingClear(true)
   }, [])
 
+  const onConfirmTagDelete = useCallback(() => {
+    if (!pendingTagDelete) return
+    send({ type: 'deleteTag', tag: pendingTagDelete })
+    setPendingTagDelete(null)
+  }, [pendingTagDelete])
+
   const onConfirmClearAll = useCallback(() => {
     send({ type: 'clearAll' })
     setPendingClear(false)
@@ -341,12 +353,16 @@ export default function App() {
 
       // 导入 / 清空对话框都是模态的：只让 Esc 生效，其余按键（尤其是 Enter）
       // 不应该穿透到下面的卡片上。
-      if ((pendingImport || pendingClear) && event.key !== 'Escape') {
+      if ((pendingImport || pendingClear || pendingTagDelete) && event.key !== 'Escape') {
         return
       }
 
       switch (event.key) {
         case 'Escape':
+          if (pendingTagDelete) {
+            setPendingTagDelete(null)
+            return
+          }
           if (pendingClear) {
             setPendingClear(false)
             return
@@ -420,6 +436,7 @@ export default function App() {
     onCloseContextMenu,
     pendingImport,
     pendingClear,
+    pendingTagDelete,
   ])
 
   return (
@@ -459,7 +476,14 @@ export default function App() {
             <button
               key={tag}
               className={`tag-filter-pill${activeTag === tag ? ' active' : ''}`}
+              title={`${tag} · 右键可删除该分类`}
               onClick={() => onFilterTag(activeTag === tag ? null : tag)}
+              onContextMenu={(event) => {
+                // 右键胶囊直接进入"删除分类"确认流程。
+                // 不用二级菜单：这里只有一个动作，弹菜单反而多一次点击。
+                event.preventDefault()
+                setPendingTagDelete(tag)
+              }}
             >
               <span className="tag-glyph">&#xE8EC;</span>
               {tag}
@@ -562,7 +586,28 @@ export default function App() {
           </p>
         </ConfirmDialog>
 
-        {/* 8. 轻量 toast，替代静默失败 */}
+        {/* 8. 删除分类：说明影响范围，避免用户以为记录会被一起删掉 */}
+        <ConfirmDialog
+          open={pendingTagDelete !== null}
+          title="删除这个分类？"
+          confirmLabel="删除分类"
+          onCancel={() => setPendingTagDelete(null)}
+          onConfirm={onConfirmTagDelete}
+        >
+          {pendingTagDelete && (
+            <>
+              <p className="dialog-line">
+                分类「<b>{pendingTagDelete}</b>」当前有{' '}
+                <b>{tagCounts[pendingTagDelete] ?? 0}</b> 条记录。
+              </p>
+              <p className="dialog-hint">
+                删除后这些记录会变成"未分类"，内容本身不受影响。
+              </p>
+            </>
+          )}
+        </ConfirmDialog>
+
+        {/* 9. 轻量 toast，替代静默失败 */}
         <Toast toast={toast} />
       </div>
     </div>

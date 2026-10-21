@@ -18,7 +18,6 @@ interface ContextMenuProps {
   onSetTag: (item: ClipboardItem, tag: string | null) => void
 }
 
-const PRESET_TAGS = ['常用', '代码', '工作', '灵感', '重要']
 
 /**
  * 鼠标离开"添加到分类"一行后，延迟多久收起子菜单。
@@ -93,8 +92,11 @@ export default function ContextMenu({
     setNewTagInput('')
   }, [menu.visible, menu.item?.id, cancelScheduledClose])
 
-  // 合并预设与已有的所有分类，保持去重
-  const mergedTags = Array.from(new Set([...PRESET_TAGS, ...allTags])).filter(Boolean)
+  // 只列数据库里真实存在的分类。
+  //
+  // 之前这里还并了一组硬编码的 PRESET_TAGS，后果是"删掉的标签下次又出现"——
+  // 前端无条件把它塞回候选列表，用户会以为删除功能坏了。
+  const mergedTags = Array.from(new Set(allTags)).filter(Boolean)
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
