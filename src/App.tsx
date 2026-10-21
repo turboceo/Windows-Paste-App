@@ -23,6 +23,17 @@ export default function App() {
   const [isMaximized, setIsMaximized] = useState(false)
   const [totalCount, setTotalCount] = useState(0)
 
+  /**
+   * 已拉取的缩略图，key 是条目 id。
+   *
+   * 单独放在这里而不是塞回 `items`，是为了让「列表数据」和「图片像素」
+   * 两条更新路径分开：拉一张图只触发一次很轻的重渲染，
+   * 也不会因为整表替换把已加载的图丢掉。
+   */
+  const [thumbnails, setThumbnails] = useState<Record<number, string | null>>({})
+  // 已发起请求的 id，避免重复拉取
+  const requestedThumbs = useRef<Set<number>>(new Set())
+
   // 分类 Tag 状态
   const [allTags, setAllTags] = useState<string[]>([])
   const [activeTag, setActiveTag] = useState<string | null>(null)
@@ -114,8 +125,15 @@ export default function App() {
           }
           break
         case 'paths':
-          // 缩略图已由后端直接内嵌为 data URL，不再需要 blob 目录路径。
-          // 保留这个分支只是为了兼容旧版宿主，收到时直接忽略。
+          // 缩略图改为按需拉取，前端不再需要 blob 目录路径。
+          // 保留这个分支只是为了兼容旧版宿主。
+          break
+        case 'thumbnail':
+          setThumbnails((prev) =>
+            prev[message.itemId] === message.imageUrl
+              ? prev
+              : { ...prev, [message.itemId]: message.imageUrl },
+          )
           break
         case 'reset':
           // 宿主在唤出面板时清空搜索与分类，前端必须跟着归零
@@ -165,6 +183,32 @@ export default function App() {
     },
     [],
   )
+
+  /** 请求某条图片的缩略图；同一个 id 只发一次。 */
+  const onRequestThumbnail = useCallback((itemId: number) => {
+    if (requestedThumbs.current.has(itemId)) return
+    requestedThumbs.current.add(itemId)
+    send({ type: 'loadThumbnail', itemId })
+  }, [])
+
+  // 条目被删掉后释放对应的缩略图，避免这块内存只增不减
+  useEffect(() => {
+    setThumbnails((prev) => {
+      const alive = new Set(items.map((item) => item.id))
+      const next: Record<number, string | null> = {}
+      let changed = false
+      for (const [key, value] of Object.entries(prev)) {
+        const id = Number(key)
+        if (alive.has(id)) {
+          next[id] = value
+        } else {
+          changed = true
+          requestedThumbs.current.delete(id)
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [items])
 
   const onExport = useCallback(() => {
     send({ type: 'export', path: null })
@@ -427,6 +471,8 @@ export default function App() {
         <div className="list-area">
           <CardGrid
             items={items}
+            thumbnails={thumbnails}
+            onRequestThumbnail={onRequestThumbnail}
             selectedId={selectedId}
             onSelect={onSelect}
             onPaste={onPaste}

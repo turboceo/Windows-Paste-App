@@ -19,6 +19,7 @@ pub mod window_util;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use tauri::{Manager, WindowEvent};
 
@@ -164,25 +165,32 @@ pub fn run() {
             }
 
             // Clipboard listener (WM_CLIPBOARDUPDATE on a dedicated Win32 thread).
+            //
+            // 这个闭包由 clipboard.rs 的**工作线程**调用（不是窗口过程），
+            // 所以在这里持锁做耗时工作不会堵住剪贴板消息循环。
             let clip_handle = handle.clone();
             ClipboardMonitor::new().start(move || {
+                let state = clip_handle.state::<SharedState>();
+
+                // 先把要用的路径取出来，**立刻释放锁**再去做解码/写盘。
+                // 锁只保护内存状态，不应该被 IO 和图片解码占着。
                 let blobs_dir = {
-                    let state = clip_handle.state::<SharedState>();
-                    let guard = state.lock().unwrap();
+                    let guard = commands::lock(&state);
                     guard.paths.blobs.clone()
                 };
 
                 let captured = ClipboardSniffer::new(&blobs_dir).capture();
-                if let Some(mut item) = captured {
-                    let state = clip_handle.state::<SharedState>();
-                    let mut guard = state.lock().unwrap();
-                    // 两种情况都会改变列表顺序：新增是插到最前，
-                    // 重复是"触摸"已有条目把它提上来。
-                    if guard.db.add(&mut item).is_ok() {
-                        guard.reload();
-                        push_items(&clip_handle, &guard);
-                        push_selection(&clip_handle, &guard);
-                    }
+                let Some(mut item) = captured else {
+                    return;
+                };
+
+                let mut guard = commands::lock(&state);
+                // 两种情况都会改变列表顺序：新增是插到最前，
+                // 重复是"触摸"已有条目把它提上来。
+                if guard.db.add(&mut item).is_ok() {
+                    guard.reload();
+                    push_items(&clip_handle, &guard);
+                    push_selection(&clip_handle, &guard);
                 }
             });
 
@@ -254,6 +262,14 @@ pub fn run() {
                     // otherwise the startup focus transitions would close it.
                     let guard = window.state::<BlurGuard>();
                     if guard.0.load(Ordering::SeqCst) {
+                        // 刚显示出来的那一小段时间里忽略失焦。
+                        //
+                        // `show()` 之后窗口要过几十毫秒才真正拿到焦点，
+                        // 这期间系统可能先报一次 Focused(false)。
+                        // 不挡掉的话，面板会"闪一下就没了"，观感跟假死一样。
+                        if window_util::recently_shown_within(Duration::from_millis(150)) {
+                            return;
+                        }
                         let _ = window.hide();
                     }
                 }
@@ -264,12 +280,20 @@ pub fn run() {
 }
 
 /// Summons or dismisses the panel. Used by the global hotkey and the tray.
+///
+/// 判定"要不要隐藏"时不只看 `is_visible()`。窗口可能处于一种别扭的中间态：
+/// 逻辑上是可见的，但实际上被别的窗口完全遮住、或者焦点早已丢失——
+/// 这时若盲目 `hide()`，用户按热键看到的就是"毫无反应"，正是"假死"的观感。
+/// 所以只在**面板确实在前台**时才隐藏，否则一律重新显示并抢焦点。
 pub fn toggle_panel(app: &tauri::AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
 
-    if window.is_visible().unwrap_or(false) {
+    let visible = window.is_visible().unwrap_or(false);
+    let focused = window.is_focused().unwrap_or(false);
+
+    if visible && focused {
         let _ = window.hide();
         return;
     }
@@ -285,33 +309,43 @@ pub fn show_panel(app: &tauri::AppHandle) {
         return;
     };
 
-    // 已经可见时只把焦点要回来，不重复刷新、不重新居中——
+    // 已经可见**且**在前台时才只把焦点要回来，不重复刷新、不重新居中——
     // 否则每次双击图标面板都会"跳"一下。
-    if window.is_visible().unwrap_or(false) {
+    // 可见但丢了焦点的情况要走完整流程：重新居中、重新 show。
+    if window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false) {
         let _ = window.set_focus();
         return;
     }
 
     // Remember the foreground window so the paste lands in the right place.
     let foreground = paste::PasteService::get_foreground_window();
-    if let Some(state) = app.try_state::<SharedState>() {
-        if let Ok(mut guard) = state.lock() {
-            guard.last_target_hwnd = foreground as isize;
-            guard.search_text.clear();
-            guard.active_tag = None;
-            guard.reload();
-            push_items(app, &guard);
-            push_selection(app, &guard);
-            // 单独发一次重置：搜索词只在"唤出面板"这一刻归零，
-            // 不能混在 items 推送里，否则剪贴板线程的推送会把用户正在敲的字擦掉。
-            emit_push(app, serde_json::json!({ "type": "reset" }));
-        }
-    }
 
+    // 先把窗口亮出来，再去碰需要加锁的状态。
+    //
+    // 顺序很关键：这段代码跑在主线程上。如果先 `lock()` 再做 reload + 全表序列化，
+    // 而恰好有别的线程正持着锁（剪贴板刚捕获到内容、或正在导入），
+    // 主线程就会在窗口显示之前被挡住 —— 用户看到的就是"按了热键没反应"。
+    // 先 show 再刷新，最坏情况也只是列表晚几十毫秒更新，而不是面板不出来。
     window_util::center_on_cursor(&window);
     window.state::<BlurGuard>().0.store(true, Ordering::SeqCst);
     let _ = window.show();
+    // 记下显示时刻：接下来 150ms 内的失焦事件视为"还没真正拿到焦点"，忽略
+    window_util::mark_shown();
     let _ = window.set_focus();
+
+    if let Some(state) = app.try_state::<SharedState>() {
+        // 中毒也要恢复：唤出面板是核心功能，不能因为一次旧 panic 就永久失效
+        let mut guard = commands::lock(&state);
+        guard.last_target_hwnd = foreground as isize;
+        guard.search_text.clear();
+        guard.active_tag = None;
+        guard.reload();
+        push_items(app, &guard);
+        push_selection(app, &guard);
+        // 单独发一次重置：搜索词只在"唤出面板"这一刻归零，
+        // 不能混在 items 推送里，否则剪贴板线程的推送会把用户正在敲的字擦掉。
+        emit_push(app, serde_json::json!({ "type": "reset" }));
+    }
 }
 
 /// 按文件名批量删除 blob，尽力而为（文件已被删掉也无所谓）。

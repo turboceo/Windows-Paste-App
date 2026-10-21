@@ -15,6 +15,9 @@ const OVERSCAN_ROWS = 2 // Render buffer rows above and below the visible area
 
 interface CardGridProps {
   items: ClipboardItem[]
+  /** 已拉取的缩略图，key 是条目 id */
+  thumbnails: Record<number, string | null>
+  onRequestThumbnail: (itemId: number) => void
   selectedId: number | null
   onSelect: (item: ClipboardItem) => void
   onPaste: (item: ClipboardItem) => void
@@ -31,6 +34,8 @@ interface CardGridProps {
  */
 export default function CardGrid({
   items,
+  thumbnails,
+  onRequestThumbnail,
   selectedId,
   onSelect,
   onPaste,
@@ -180,6 +185,8 @@ export default function CardGrid({
             <ClipCard
               key={item.id}
               item={item}
+              thumbnail={thumbnails[item.id]}
+              onRequestThumbnail={onRequestThumbnail}
               selected={item.id === selectedId}
               onSelect={onSelect}
               onPaste={onPaste}

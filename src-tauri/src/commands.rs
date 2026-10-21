@@ -68,6 +68,9 @@ pub enum HostRequest {
     PickImportFile,
     /// 清空全部历史（含已缓存的图片文件）。
     ClearAll,
+    /// 按需取一张图片条目的缩略图。列表推送里不再内嵌缩略图。
+    #[serde(rename_all = "camelCase")]
+    LoadThumbnail { item_id: i64 },
     DragMove,
     Minimize,
     Maximize,
@@ -308,6 +311,33 @@ pub fn dispatch(app: AppHandle, state: State<'_, SharedState>, req: HostRequest)
                 ),
             }
         }
+        HostRequest::LoadThumbnail { item_id } => {
+            // 锁内只查 blob 文件名，解码 + base64 放到锁外做——
+            // 缩略图可能涉及一次 PNG 解码，不该占着全局锁。
+            let lookup = {
+                let guard = lock(&state);
+                // 先取到需要的两个值再一起交出，避免在 `.map` 闭包里
+                // 同时借用 items 和 paths 而和迭代器的借用打架
+                let blob_name = guard
+                    .items
+                    .iter()
+                    .find(|i| i.id == item_id)
+                    .and_then(|i| i.blob_path.clone());
+                blob_name.map(|name| (guard.paths.blobs.clone(), name))
+            };
+
+            if let Some((blobs_dir, file_name)) = lookup {
+                let thumb = crate::state::thumbnail_for_blob(&blobs_dir, &file_name);
+                emit_push(
+                    &app,
+                    json!({
+                        "type": "thumbnail",
+                        "itemId": item_id,
+                        "imageUrl": thumb,
+                    }),
+                );
+            }
+        }
         HostRequest::DragMove => {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.start_dragging();
@@ -386,12 +416,25 @@ pub fn move_selection(state: &mut AppState, delta: i64) {
     state.selected_id = Some(state.items[next as usize].id);
 }
 
-fn lock<'a>(state: &'a State<'_, SharedState>) -> MutexGuard<'a, AppState> {
-    state.lock().expect("app state poisoned")
+/// 取状态锁。
+///
+/// 中毒时**不 panic**，而是把里面那份半残的状态取出来继续用。
+/// 原来这里是 `expect("app state poisoned")`：只要有一次 panic 发生在持锁期间，
+/// 这把 Mutex 就永久中毒，之后每一次唤出、每一个命令都会 panic——
+/// 而 release 又是 `panic = "abort"`，进程不退出但功能全废，看起来就是假死。
+///
+/// 状态可能是脏的，但那总比整个应用永久不可用好。
+pub fn lock<'a>(state: &'a State<'_, SharedState>) -> MutexGuard<'a, AppState> {
+    state.lock().unwrap_or_else(|poisoned| {
+        eprintln!("[windows-paste] 状态锁曾中毒，已恢复");
+        poisoned.into_inner()
+    })
 }
 
 fn lock_mut<'a>(state: &'a State<'_, SharedState>) -> MutexGuard<'a, AppState> {
-    state.lock().expect("app state poisoned")
+    // 与 lock 完全同义：MutexGuard 本身就以 &mut 解引用，之前分成两个函数
+    // 只是历史遗留，分开写反而容易只改一处漏掉另一处。
+    lock(state)
 }
 
 #[cfg(test)]

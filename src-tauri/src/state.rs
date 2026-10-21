@@ -154,48 +154,48 @@ pub struct ClipItemDto {
     pub r#type: String,
     pub content: String,
     pub preview: String,
-    /// 图片条目的缩略图 data URL（`data:image/png;base64,...`）。
-    /// 后端已缩放到 480px 并缓存，前端可直接放进 `<img src>`。
-    pub image_url: Option<String>,
     pub created_at_label: String,
     pub pinned: bool,
     pub tag: Option<String>,
     /// 原文长度超过上限、落库时被截断过。
     pub truncated: bool,
+    /// 这是一个图片条目，可以让前端按需来取缩略图。
+    pub has_image: bool,
 }
 
 impl ClipItemDto {
     /// 构造推给前端的 DTO。
     ///
-    /// 图片条目的 `image_url` 是**缩略图的 data URL**（不是原图，也不是路径）。
+    /// 列表里**不带图片数据**，只给一个 `has_image` 标记；缩略图由前端对
+    /// 可见的卡片单独调用 `LoadThumbnail` 拉取。
     ///
-    /// 为什么用缩略图而不是 asset 协议：
-    /// 卡片上只需要一个 ~240px 的预览，而 asset 协议要求 scope 变量展开、
-    /// CSP、capabilities 三处同时正确，任何一处出错都是静默失败——界面上
-    /// 只会看到一片空白，很难定位。后端直接解码 + 缩放 + base64，
-    /// 只依赖一个能跑通的 IPC 通道，且缩略图体积只有原图的几十 KB 量级。
-    pub fn from_item(item: &ClipboardItem, blobs_dir: &std::path::Path) -> Self {
-        let image_url = match item.item_type {
-            ClipboardItemType::Image => item
-                .blob_path
-                .as_ref()
-                .and_then(|name| thumbnail_data_url(blobs_dir, name)),
-            _ => None,
-        };
+    /// 为什么这么做：列表推送每次都是全表。如果每条图片都内嵌一张几十 KB 的
+    /// data URL，500 条里几十张图就是几 MB 的 JSON，每次搜索、每次新增、每次
+    /// 唤出面板都要重新序列化并跨 IPC 传一遍。表越大越慢——这正是"用久了
+    /// 就唤不出来"的放大器。现在推送负载与图片数量无关。
+    pub fn from_item(item: &ClipboardItem, _blobs_dir: &std::path::Path) -> Self {
+        let has_image = matches!(item.item_type, ClipboardItemType::Image)
+            && item.blob_path.is_some();
 
         Self {
             id: item.id,
             r#type: item.item_type.as_str().to_string(),
             content: item.content.clone(),
             preview: item.preview(),
-            image_url,
             created_at_label: item.created_at_label(),
             pinned: item.pinned,
             tag: item.tag.clone(),
             // 截断阈值是入库时的字符上限，到顶即认为被裁剪过
             truncated: item.content.chars().count() >= MAX_CONTENT_CHARS,
+            has_image,
         }
     }
+
+}
+
+/// 按 blob 文件名取缩略图 data URL，供 `HostRequest::LoadThumbnail` 使用。
+pub fn thumbnail_for_blob(blobs_dir: &std::path::Path, file_name: &str) -> Option<String> {
+    thumbnail_data_url(blobs_dir, file_name)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -251,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn test_thumbnail_is_a_data_url() {
+    fn test_list_push_does_not_embed_thumbnails() {
         let dir = std::env::temp_dir().join(format!("test_wp_thumb_a_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         std::fs::write(dir.join("pic.png"), TINY_PNG).unwrap();
@@ -259,13 +259,32 @@ mod tests {
         let item = image_item(Some("pic.png"));
         let dto = ClipItemDto::from_item(&item, &dir);
 
-        let url = dto.image_url.expect("图片条目必须带缩略图");
+        // 列表 DTO 只有标记，不含图片数据：
+        // 这是"用久了推送越来越大"的根源，也是唤出变慢的放大器。
+        assert!(dto.has_image, "图片条目必须带 has_image 标记");
+        // 序列化后的 JSON 里不应出现 base64 大字段
+        let json = serde_json::to_string(&dto).expect("serialize dto");
+        assert!(
+            !json.contains("base64"),
+            "列表推送里不应内嵌缩略图数据，实际 payload: {json}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_thumbnail_is_a_data_url() {
+        let dir = std::env::temp_dir().join(format!("test_wp_thumb_b_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(dir.join("pic.png"), TINY_PNG).unwrap();
+
+        let url = thumbnail_for_blob(&dir, "pic.png").expect("应当能生成缩略图");
         assert!(
             url.starts_with("data:image/png;base64,"),
             "缩略图应是可直接用于 <img src> 的 data URL，实际是 {}",
             &url[..url.len().min(40)]
         );
-        // 能被解码回非空的 PNG
+
         use base64::Engine;
         let raw = base64::engine::general_purpose::STANDARD
             .decode(url.trim_start_matches("data:image/png;base64,"))
@@ -277,19 +296,17 @@ mod tests {
 
     #[test]
     fn test_missing_blob_yields_no_thumbnail() {
-        let dir = std::env::temp_dir().join(format!("test_wp_thumb_b_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("test_wp_thumb_c_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
 
-        let item = image_item(Some("nope.png"));
-        let dto = ClipItemDto::from_item(&item, &dir);
-        // 文件不存在时不能 panic，只是没有缩略图，界面退回文字占位
-        assert!(dto.image_url.is_none());
+        // 文件不存在时不能 panic，只是取不到缩略图，界面退回文字占位
+        assert!(thumbnail_for_blob(&dir, "nope.png").is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn test_text_item_has_no_thumbnail() {
+    fn test_text_item_has_no_image() {
         let dir = std::env::temp_dir();
         let item = ClipboardItem {
             id: 2,
@@ -301,6 +318,7 @@ mod tests {
             pinned: false,
             tag: None,
         };
-        assert!(ClipItemDto::from_item(&item, &dir).image_url.is_none());
+        let dto = ClipItemDto::from_item(&item, &dir);
+        assert!(!dto.has_image);
     }
 }

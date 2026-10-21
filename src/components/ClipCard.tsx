@@ -3,6 +3,12 @@ import type { ClipboardItem } from '../types'
 
 interface ClipCardProps {
   item: ClipboardItem
+  /**
+   * 缩略图 data URL。`undefined` = 还没拉过，`null` = 拉过但取不到。
+   * 两者在视觉上都是占位，但前者会触发一次拉取。
+   */
+  thumbnail: string | null | undefined
+  onRequestThumbnail: (itemId: number) => void
   selected: boolean
   onSelect: (item: ClipboardItem) => void
   onPaste: (item: ClipboardItem) => void
@@ -14,6 +20,8 @@ interface ClipCardProps {
 /** One history card, styled after Paste.app. */
 export default function ClipCard({
   item,
+  thumbnail,
+  onRequestThumbnail,
   selected,
   onSelect,
   onPaste,
@@ -53,8 +61,14 @@ export default function ClipCard({
       .map((fullPath) => ({ name: fullPath.split(/[\\/]/).pop() || fullPath, fullPath }))
   }, [item.type, item.content])
 
-  // 后端直接给缩略图的 data URL，前端不需要再拼路径
-  const imageSrc = item.type === 'Image' ? item.imageUrl : null
+  // 缩略图按需拉取：卡片被挂载（即滚动到可见区域）时才请求
+  useEffect(() => {
+    if (item.hasImage && thumbnail === undefined) {
+      onRequestThumbnail(item.id)
+    }
+  }, [item.hasImage, item.id, thumbnail, onRequestThumbnail])
+
+  const imageSrc = item.type === 'Image' ? thumbnail ?? null : null
 
   // 加载失败后不要一直重试：记住这张卡已经失败过，直接显示占位
   const [imageFailed, setImageFailed] = useState(false)

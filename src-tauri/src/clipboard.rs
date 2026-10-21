@@ -3,6 +3,7 @@ use std::fs;
 use std::os::windows::ffi::OsStringExt;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
@@ -31,8 +32,18 @@ const CF_UNICODETEXT: u32 = 13;
 const CF_HDROP: u32 = 15;
 const CF_DIBV5: u32 = 17;
 
-static CLIP_CALLBACK: Mutex<Option<Box<dyn Fn() + Send + 'static>>> = Mutex::new(None);
+/// 用 `Arc` 而不是 `Box`：工作线程要先把回调克隆出来、**释放锁**再执行，
+/// 否则整个捕获+入库+推送过程都压在这把锁上。
+static CLIP_CALLBACK: Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync + 'static>>> =
+    Mutex::new(None);
 static CLIP_PAUSED: AtomicBool = AtomicBool::new(false);
+
+/// 把"剪贴板变了"这个信号从窗口过程转交给工作线程的门铃。
+///
+/// 容量只有 1：连续复制时后到的通知会直接丢弃（`try_send` 返回 Full），
+/// 这正是我们想要的——我们只关心"当前剪贴板内容是什么"，中间态没有意义。
+/// 所以不需要无界队列，也不会堆积。
+static CLIP_SIGNAL: Mutex<Option<SyncSender<()>>> = Mutex::new(None);
 
 pub struct ClipboardMonitor;
 
@@ -50,11 +61,48 @@ impl ClipboardMonitor {
     /// for AddClipboardFormatListener.
     pub fn start<F>(&self, on_change: F)
     where
-        F: Fn() + Send + 'static,
+        F: Fn() + Send + Sync + 'static,
     {
         if let Ok(mut lock) = CLIP_CALLBACK.lock() {
-            *lock = Some(Box::new(on_change));
+            *lock = Some(std::sync::Arc::new(on_change));
         }
+
+        // 工作线程：真正做"捕获 + 入库 + 推送"的地方。
+        //
+        // 这一步必须和窗口过程分离。原来回调是在 WndProc 里同步跑的，
+        // 而回调会持 SharedState 锁做全表重查与序列化；期间热键线程要唤出
+        // 面板时就得抢同一把锁，于是按了快捷键没反应——表现就是"假死"。
+        // WndProc 里只留一个 try_send，立刻返回。
+        let (tx, rx) = sync_channel::<()>(1);
+        if let Ok(mut slot) = CLIP_SIGNAL.lock() {
+            *slot = Some(tx);
+        }
+
+        thread::spawn(move || {
+            // recv() 在通道关闭时返回 Err，此时退出线程
+            while rx.recv().is_ok() {
+                // 轻微的合并窗口：一次复制常常触发多条 WM_CLIPBOARDUPDATE，
+                // 等一小会儿把连发合并成一次捕获。
+                thread::sleep(Duration::from_millis(20));
+                // 排空积压的信号
+                while rx.try_recv().is_ok() {}
+
+                if CLIP_PAUSED.load(Ordering::SeqCst) {
+                    continue;
+                }
+
+                // 克隆出 Arc 后立刻释放锁，再执行回调。
+                // 回调里会去写库、序列化整表，不能让它们压在这把锁上。
+                let callback = CLIP_CALLBACK
+                    .lock()
+                    .ok()
+                    .and_then(|slot| slot.as_ref().map(std::sync::Arc::clone));
+
+                if let Some(cb) = callback {
+                    cb();
+                }
+            }
+        });
 
         thread::spawn(move || unsafe {
             let class_name = wide_str("WindowsPaste_ClipMonitor");
@@ -116,10 +164,16 @@ unsafe extern "system" fn wnd_proc(
 ) -> LRESULT {
     match msg {
         WM_CLIPBOARDUPDATE => {
+            // 这里**只能**做极轻的工作然后立刻返回。
+            //
+            // 窗口过程运行在剪贴板监听线程的消息循环里；如果在这里做捕获、
+            // 写库、序列化，消息循环就被堵住，系统对剪贴板的后续通知也会
+            // 排队积压，同时持锁会拖住热键线程的唤出。只投一个信号即可。
             if !CLIP_PAUSED.load(Ordering::SeqCst) {
-                if let Ok(lock) = CLIP_CALLBACK.lock() {
-                    if let Some(cb) = lock.as_ref() {
-                        cb();
+                if let Ok(lock) = CLIP_SIGNAL.lock() {
+                    if let Some(tx) = lock.as_ref() {
+                        // Full 表示工作线程还在处理上一条，直接丢弃即可
+                        let _ = tx.try_send(());
                     }
                 }
             }

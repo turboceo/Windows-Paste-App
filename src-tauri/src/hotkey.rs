@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::thread;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
@@ -28,9 +29,12 @@ impl HotkeyManager {
     /// 只会以为软件坏了。
     pub fn start<F, E>(on_pressed: F, on_failed: E)
     where
-        F: Fn() + Send + 'static,
+        F: Fn() + Send + Sync + 'static,
         E: Fn(&'static str) + Send + 'static,
     {
+        // 包一层 Arc：每次热键都要在独立线程里跑一次，需要可克隆的句柄
+        let on_pressed: Arc<dyn Fn() + Send + Sync> = Arc::new(on_pressed);
+
         thread::spawn(move || unsafe {
             let class_name = wide_str("WindowsPaste_HotkeyWindow");
 
@@ -79,7 +83,15 @@ impl HotkeyManager {
                 let mut msg: MSG = std::mem::zeroed();
                 while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
                     if msg.message == WM_HOTKEY && msg.wParam == HOTKEY_ID as usize {
-                        on_pressed();
+                        // 交给独立线程处理，消息循环立刻回到 GetMessageW。
+                        //
+                        // 关键：`on_pressed` 内部会 run_on_main_thread，而主线程
+                        // 可能正在等锁（比如剪贴板线程持锁做全表序列化）。
+                        // 若在这里同步调用，热键线程就被挂住，消息循环停摆，
+                        // 之后所有 WM_HOTKEY 都堆在队列里 —— 热键彻底失效。
+                        // 起一条短命线程，最坏情况也只是这一次唤出慢，不会累积。
+                        let pressed = Arc::clone(&on_pressed);
+                        thread::spawn(move || (pressed)());
                     }
                     TranslateMessage(&msg);
                     DispatchMessageW(&msg);

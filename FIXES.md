@@ -48,9 +48,7 @@ SQLite 顺带切到 WAL + `synchronous=NORMAL`。
   导入也可以把 `.json` 直接拖进窗口（Tauri drag-drop 能给真实路径）。
   托盘菜单只保留「唤起面板」与「退出」，不再承担数据操作。
 
-## 四、交互与性能（P1）
-
-| 项 | 修法 |
+## 四、交互与性能（P1）| 项 | 修法 |
 | :--- | :--- |
 | 图片 base64 膨胀 | DTO 只给 blob **文件名**，前端 `convertFileSrc` 走 asset 协议直读；`blobsRoot` 由宿主下发、作为 prop 传入卡片 |
 | 上下键列数 bug | 语义改为 `\|delta\| > 1` 即"按行走"，步长只由后端 `columns` 决定；前端发 `±2` 而非 `±4` |
@@ -60,6 +58,25 @@ SQLite 顺带切到 WAL + `synchronous=NORMAL`。
 | 数据操作入口藏太深 | 托盘右键菜单里的导入/导出/清空撤掉，改为工具栏上的三个文字按钮；清空走二次确认对话框 |
 | 暗色主题 | 只覆盖 `:root` 令牌 + 少量硬编码色，组件零改动 |
 | 死代码 / 冗余依赖 | 删除 `directories`、tauri `tray-icon` feature；`get_most_recent_hash`、`get_most_recent_id` 一并移除 |
+
+## 四之二、运行一段时间后唤不起来（假死）
+
+现象：程序启动一段时间后，按 `Ctrl+Shift+V` 没有反应，像是卡死。
+
+这是一条由四个因素叠出来的故障链，四个都修了：
+
+| # | 问题 | 位置 | 修法 |
+| :--- | :--- | :--- | :--- |
+| 1 | **剪贴板回调跑在窗口过程里** | `clipboard.rs` | 回调原本在 `WndProc` 里同步执行，而它会持 `SharedState` 锁做全表重查与序列化。这期间热键线程要唤出面板就得抢同一把锁，于是按了没反应。现在 `WndProc` 只 `try_send` 一个信号立刻返回，真正的处理移到独立工作线程 |
+| 2 | **锁中毒导致永久假死** | `commands.rs` | `lock()` 原来是 `expect("app state poisoned")`：任何一次持锁 panic 都会让这把 Mutex 永久中毒，之后每次唤出都 panic；而 release 是 `panic = "abort"`，进程不退出但功能全废。改成 `unwrap_or_else(|e| e.into_inner())` |
+| 3 | **热键线程被回调拖住** | `hotkey.rs` | `on_pressed()` 原本在热键线程的消息循环里同步跑。一旦它卡住，消息循环停摆，后续 `WM_HOTKEY` 全部堆积，热键彻底失效。改为每次投递到短命线程，最坏只影响这一次 |
+| 4 | **推送负载随历史增长** | `state.rs` / `commands.rs` | 每次全表推送都内嵌所有图片的 base64 缩略图，表越大越慢。现在列表只带 `hasImage: true`，缩略图由前端对可见卡片按需拉取（`LoadThumbnail`），按 id 缓存 |
+
+另外三处配套修正：
+
+- `show_panel()` 改为**先 `show()` 再刷数据**。原来先持锁 reload + 序列化，主线程可能被挡住，窗口根本来不及显示。
+- `toggle_panel()` 的判定从"可见就隐藏"改成"**可见且在前台**才隐藏"。窗口可见但丢了焦点时，按热键应当重新唤出，而不是静默 hide。
+- `show()` 之后的 150ms 内忽略失焦事件（`window_util::mark_shown` / `recently_shown_within`）。否则窗口还没真正拿到焦点，系统先报一次失焦，面板会闪一下就消失。
 
 ## 五、测试与文档
 

@@ -94,7 +94,7 @@ function seedDevData(handler: (message: HostPush) => void): void {
       type: isFile ? ('Files' as const) : ('Text' as const),
       content: `[${String(index + 1).padStart(2, '0')}] ${text}`,
       preview: `[${String(index + 1).padStart(2, '0')}] ${text}`,
-      imageUrl: null,
+      hasImage: false,
       createdAtLabel: '2026-10-16 12:00',
       pinned: index === 2 || index === 15,
       tag: index === 2 ? '代码' : index === 5 ? '常用' : null,

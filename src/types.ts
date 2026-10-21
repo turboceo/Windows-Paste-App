@@ -10,10 +10,13 @@ export interface ClipboardItem {
   /** Display-ready preview line. */
   preview: string
   /**
-   * 图片条目的**缩略图 data URL**（`data:image/png;base64,...`）。
-   * 由后端解码原图、缩放到 480px 后内联，可以直接交给 `<img src>`。
+   * 这是一个图片条目，值得去拉缩略图。
+   *
+   * 列表本身**不带**图片数据：拉起缩略图要单独发 `loadThumbnail`，
+   * 结果通过 `thumbnail` 推送回来并按 id 缓存在 App 里。
+   * 这样每次推送的负载与图片数量无关，不会越用越慢。
    */
-  imageUrl: string | null
+  hasImage: boolean
   /** Preformatted timestamp for the card footer. */
   createdAtLabel: string
   pinned: boolean
@@ -57,6 +60,7 @@ export type HostRequest =
   | { type: 'import'; path: string }
   | { type: 'pickImportFile' }
   | { type: 'clearAll' }
+  | { type: 'loadThumbnail'; itemId: number }
   | { type: 'dragMove' }
   | { type: 'minimize' }
   | { type: 'maximize' }
@@ -85,6 +89,8 @@ export type HostPush =
       error?: string
     }
   | { type: 'paths'; blobsRoot: string }
+  /** 按需拉取的缩略图回来了；`imageUrl` 为 null 表示这张图取不到。 */
+  | { type: 'thumbnail'; itemId: number; imageUrl: string | null }
   /** 面板被唤出：宿主已清空搜索词与分类筛选，前端同步归零。 */
   | { type: 'reset' }
   | { type: 'hotkeyUnavailable'; label: string; message: string }
