@@ -67,12 +67,14 @@ impl ClipboardMonitor {
             *lock = Some(std::sync::Arc::new(on_change));
         }
 
-        // 工作线程：真正做"捕获 + 入库 + 推送"的地方。
+        // 工作线程：真正做"捕获"的地方。
         //
         // 这一步必须和窗口过程分离。原来回调是在 WndProc 里同步跑的，
-        // 而回调会持 SharedState 锁做全表重查与序列化；期间热键线程要唤出
-        // 面板时就得抢同一把锁，于是按了快捷键没反应——表现就是"假死"。
-        // WndProc 里只留一个 try_send，立刻返回。
+        // 一次捕获 + 入库能占住消息循环很久，期间系统对剪贴板的后续通知
+        // 全部积压。WndProc 里只留一个 try_send，立刻返回。
+        //
+        // 注意这里只做捕获：拿到条目后投递给状态 owner 线程去做入库与推送
+        // （见 lib.rs 的 ClipboardMonitor::start 调用处）。
         let (tx, rx) = sync_channel::<()>(1);
         if let Ok(mut slot) = CLIP_SIGNAL.lock() {
             *slot = Some(tx);

@@ -7,7 +7,12 @@ use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORN
 use windows_sys::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, SetFocus,
+    SetForegroundWindow, SetWindowPos, ShowWindow, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOMOVE,
+    SWP_NOSIZE, SWP_SHOWWINDOW, SW_RESTORE,
+};
 
 fn hwnd_of(window: &WebviewWindow) -> Option<HWND> {
     window.hwnd().ok().map(|h| h.0 as HWND)
@@ -121,6 +126,69 @@ pub fn polish(window: &WebviewWindow) {
             // Acrylic blur behind the transparent webview. Failures are non-fatal:
             // the panel still renders with its own opaque-ish background.
             let _ = window_vibrancy::apply_acrylic(window, Some((246, 248, 251, 180)));
+        }
+    }
+}
+
+/// 把窗口强制提到最前并抢到焦点。
+///
+/// 为什么不能只用 `set_focus()`：
+/// Windows 有"前台锁"(foreground lock) 机制——只有当前拥有前台的进程、
+/// 或刚收到用户输入（键盘/鼠标）的进程，才能调用 `SetForegroundWindow` 把
+/// 自己的窗口切到前台。其余情况下这个调用会**静默失败**，窗口留在后面，
+/// 用户看到的就是"点了托盘菜单没反应"。
+///
+/// 绕过办法是经典的三步：
+///   1. 把本线程的输入队列挂到当前前台线程上（`AttachThreadInput`）；
+///   2. 于是本线程被视为"拥有输入焦点"，`SetForegroundWindow` 得以生效；
+///   3. 立刻解挂（`AttachThreadInput(.., false)`），避免两个线程的输入状态纠缠。
+///
+/// 另外先 `ShowWindow(SW_RESTORE)` 一次：如果窗口是最小化状态，
+/// 光 `Show` 不会还原它。
+pub fn force_foreground(window: &WebviewWindow) {
+    let Some(hwnd) = hwnd_of(window) else {
+        return;
+    };
+
+    unsafe {
+        // 最小化时先还原，否则提升前台也没意义
+        if IsIconic(hwnd) != 0 {
+            ShowWindow(hwnd, SW_RESTORE);
+        }
+
+        let foreground = GetForegroundWindow();
+        let target_thread = GetWindowThreadProcessId(foreground, std::ptr::null_mut());
+        let this_thread = GetCurrentThreadId();
+
+        let attached = target_thread != 0
+            && target_thread != this_thread
+            && AttachThreadInput(this_thread, target_thread, 1) != 0;
+
+        // 置顶一次再取消，能强制刷新 Z 序
+        SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        );
+        SetWindowPos(
+            hwnd,
+            HWND_NOTOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        );
+
+        let _ = SetForegroundWindow(hwnd);
+        let _ = SetFocus(hwnd);
+
+        if attached {
+            AttachThreadInput(this_thread, target_thread, 0);
         }
     }
 }

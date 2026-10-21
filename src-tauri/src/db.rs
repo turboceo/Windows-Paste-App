@@ -6,6 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension, Result};
 
 use crate::model::{ClipboardItem, ClipboardItemType};
 
+#[derive(Clone)]
 pub struct AppPaths {
     pub root: PathBuf,
     pub blobs: PathBuf,

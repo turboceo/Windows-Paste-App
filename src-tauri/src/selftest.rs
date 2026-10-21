@@ -1,29 +1,32 @@
-//! Windows Paste 自动化端到端功能自检套件 (End-to-End Self-Test Suite)
+//! 端到端自检。
 //!
-//! 在命令行通过 `--selftest` 触发，全自动验证：
-//! 1. SQLite 数据库与多品类种子数据加载
-//! 2. 剪贴板模糊搜索与实时过滤
-//! 3. 搜索清空与全量列表恢复
-//! 4. 键盘矩阵与卡片焦点移动 (delta: +/-1, +/-4)
-//! 5. 卡片置顶与顺序重排持久化
-//! 6. 卡片删除与本地持久化同步
-//! 7. Win32 剪贴板原生写入与内容校验
-//! 8. 主窗口多显示器几何居中与无边框设置
+//! 状态现在归 `worker` 线程独占，`dispatch` 也变成了异步投递，
+//! 所以测试不能再去"加锁读状态"。改写方式是：
+//!
+//! - 发命令用 `handle.send(...)`
+//! - 读状态用 `handle.snapshot()`——它排在同一条 channel 上，
+//!   因此返回时前面发出的命令一定已经处理完
+//!
+//! 这样测试既拿到了确定性的同步语义，又不需要在生产代码里保留任何锁。
 
 use std::thread;
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
 
-use crate::commands::{dispatch, HostRequest};
+use crate::commands::HostRequest;
 use crate::model::ClipboardItemType;
-use crate::state::SharedState;
+use crate::worker::{Command, StateHandle};
 
 pub fn start(app: AppHandle) {
     thread::spawn(move || {
-        let state = app.state::<SharedState>();
         // 等待 Webview 与底层窗口完成首帧初始化
         thread::sleep(Duration::from_millis(600));
+
+        let Some(handle) = app.try_state::<StateHandle>().map(|s| s.inner().clone()) else {
+            println!("自检失败：找不到状态句柄");
+            std::process::exit(1);
+        };
 
         let start_time = Instant::now();
         println!("\n========================================================");
@@ -33,17 +36,28 @@ pub fn start(app: AppHandle) {
         let mut passed = 0;
         let total = 10;
 
+        // 便捷封装：发一条请求
+        let send = |req: HostRequest| handle.send(Command::Dispatch(req));
+
         // --------------------------------------------------------------------
         // TEST 1: SQLite 数据库与 50 条测试种子数据验证
         // --------------------------------------------------------------------
         print!("  [1/{}] 验证 SQLite 本地数据库与 50 条种子数据... ", total);
-        let test1_ok = {
-            let guard = state.lock().unwrap();
-            let has_50 = guard.total_count == 50 && guard.items.len() == 50;
-            let has_pinned = guard.items.iter().any(|i| i.pinned);
-            let has_text = guard.items.iter().any(|i| i.item_type == ClipboardItemType::Text);
-            let has_files = guard.items.iter().any(|i| i.item_type == ClipboardItemType::Files);
-            has_50 && has_pinned && has_text && has_files
+        let test1_ok = match handle.snapshot() {
+            Some(snap) => {
+                let has_50 = snap.total_count == 50 && snap.item_count == 50;
+                let has_pinned = snap.items.iter().any(|i| i.pinned);
+                let has_text = snap
+                    .items
+                    .iter()
+                    .any(|i| i.item_type == ClipboardItemType::Text);
+                let has_files = snap
+                    .items
+                    .iter()
+                    .any(|i| i.item_type == ClipboardItemType::Files);
+                has_50 && has_pinned && has_text && has_files
+            }
+            None => false,
         };
         if test1_ok {
             println!("PASS (50 条多品类数据完整加载)");
@@ -56,15 +70,20 @@ pub fn start(app: AppHandle) {
         // TEST 2: 剪贴板模糊搜索过滤 (Search Filtering)
         // --------------------------------------------------------------------
         print!("  [2/{}] 验证剪贴板模糊搜索过滤 (检索 'github')... ", total);
-        let _ = dispatch(
-            app.clone(),
-            app.state::<SharedState>(),
-            HostRequest::Search { text: "github".to_string() },
-        );
-        let test2_ok = {
-            let guard = state.lock().unwrap();
-            let count = guard.items.len();
-            count > 0 && count < 50 && guard.items.iter().all(|i| i.content.to_lowercase().contains("github"))
+        send(HostRequest::Search {
+            text: "github".to_string(),
+        });
+        let test2_ok = match handle.snapshot() {
+            Some(snap) => {
+                let count = snap.item_count;
+                count > 0
+                    && count < 50
+                    && snap
+                        .items
+                        .iter()
+                        .all(|i| i.content.to_lowercase().contains("github"))
+            }
+            None => false,
         };
         if test2_ok {
             println!("PASS (筛选结果精确匹配，实时收窄列表)");
@@ -77,14 +96,10 @@ pub fn start(app: AppHandle) {
         // TEST 3: 搜索条件清空与全量恢复 (Search Reset)
         // --------------------------------------------------------------------
         print!("  [3/{}] 验证搜索重置与历史全量恢复... ", total);
-        let _ = dispatch(
-            app.clone(),
-            app.state::<SharedState>(),
-            HostRequest::Search { text: "".to_string() },
-        );
-        let test3_ok = {
-            let guard = state.lock().unwrap();
-            guard.items.len() == 50 && guard.total_count == 50
+        send(HostRequest::Search { text: String::new() });
+        let test3_ok = match handle.snapshot() {
+            Some(snap) => snap.item_count == 50 && snap.total_count == 50,
+            None => false,
         };
         if test3_ok {
             println!("PASS (完全恢复 50 项初始历史)");
@@ -97,27 +112,20 @@ pub fn start(app: AppHandle) {
         // TEST 4: 矩阵焦点导航与跨行移动 (Move Navigation)
         // --------------------------------------------------------------------
         print!("  [4/{}] 验证键盘矩阵焦点移动 (单格 + 跨行)... ", total);
-        let first_id = {
-            let guard = state.lock().unwrap();
-            guard.items[0].id
-        };
-        let _ = dispatch(
-            app.clone(),
-            app.state::<SharedState>(),
-            HostRequest::Select { item_id: first_id },
-        );
+        let first_id = handle
+            .snapshot()
+            .and_then(|s| s.items.first().map(|i| i.id))
+            .unwrap_or(0);
+
+        send(HostRequest::Select { item_id: first_id });
         // 向后移动 1 格
-        let _ = dispatch(app.clone(), app.state::<SharedState>(), HostRequest::Move { delta: 1 });
-        let second_id = {
-            let guard = state.lock().unwrap();
-            guard.selected_id
-        };
+        send(HostRequest::Move { delta: 1 });
+        let second_id = handle.snapshot().and_then(|s| s.selected_id);
+
         // 跨行移动：|delta| > 1 即"按行走"，步长由后端的 columns 决定
-        let _ = dispatch(app.clone(), app.state::<SharedState>(), HostRequest::Move { delta: 2 });
-        let row2_id = {
-            let guard = state.lock().unwrap();
-            guard.selected_id
-        };
+        send(HostRequest::Move { delta: 2 });
+        let row2_id = handle.snapshot().and_then(|s| s.selected_id);
+
         let test4_ok = second_id != Some(first_id) && row2_id != second_id && row2_id.is_some();
         if test4_ok {
             println!("PASS (单步移动与跨行网格焦点响应正常)");
@@ -130,33 +138,24 @@ pub fn start(app: AppHandle) {
         // TEST 5: 卡片置顶与顺序重排持久化 (Toggle Pin)
         // --------------------------------------------------------------------
         print!("  [5/{}] 验证卡片置顶与取消置顶同步... ", total);
-        let target_item = {
-            let guard = state.lock().unwrap();
-            guard.items.iter().find(|i| !i.pinned).cloned()
-        };
+        let target_item = handle
+            .snapshot()
+            .and_then(|s| s.items.iter().find(|i| !i.pinned).cloned());
+
         let mut test5_ok = false;
         if let Some(target) = target_item {
-            // 翻转为置顶
-            let _ = dispatch(
-                app.clone(),
-                app.state::<SharedState>(),
-                HostRequest::TogglePin { item_id: target.id },
-            );
-            let pinned_ok = {
-                let guard = state.lock().unwrap();
-                guard.items.iter().any(|i| i.id == target.id && i.pinned)
-            };
+            send(HostRequest::TogglePin { item_id: target.id });
+            let pinned_ok = handle
+                .snapshot()
+                .map(|s| s.items.iter().any(|i| i.id == target.id && i.pinned))
+                .unwrap_or(false);
 
-            // 再次翻转取消置顶
-            let _ = dispatch(
-                app.clone(),
-                app.state::<SharedState>(),
-                HostRequest::TogglePin { item_id: target.id },
-            );
-            let unpinned_ok = {
-                let guard = state.lock().unwrap();
-                guard.items.iter().any(|i| i.id == target.id && !i.pinned)
-            };
+            send(HostRequest::TogglePin { item_id: target.id });
+            let unpinned_ok = handle
+                .snapshot()
+                .map(|s| s.items.iter().any(|i| i.id == target.id && !i.pinned))
+                .unwrap_or(false);
+
             test5_ok = pinned_ok && unpinned_ok;
         }
         if test5_ok {
@@ -172,20 +171,22 @@ pub fn start(app: AppHandle) {
         print!("  [6/{}] 验证卡片物理删除与列表自动更新... ", total);
         // 用删除前的总数做基准，而不是把 50 硬编码成 49——
         // 换个 --seed 参数就不会再误报。
-        let (del_target, before_count) = {
-            let guard = state.lock().unwrap();
-            (guard.items.last().cloned(), guard.total_count)
-        };
+        let before = handle.snapshot();
         let mut test6_ok = false;
-        if let Some(del_item) = del_target {
-            let _ = dispatch(
-                app.clone(),
-                app.state::<SharedState>(),
-                HostRequest::Delete { item_id: del_item.id },
-            );
-            let guard = state.lock().unwrap();
-            test6_ok = guard.total_count + 1 == before_count
-                && !guard.items.iter().any(|i| i.id == del_item.id);
+        if let Some(snap) = before {
+            if let Some(del_item) = snap.items.last().cloned() {
+                let before_count = snap.total_count;
+                send(HostRequest::Delete {
+                    item_id: del_item.id,
+                });
+                test6_ok = handle
+                    .snapshot()
+                    .map(|after| {
+                        after.total_count + 1 == before_count
+                            && !after.items.iter().any(|i| i.id == del_item.id)
+                    })
+                    .unwrap_or(false);
+            }
         }
         if test6_ok {
             println!("PASS (历史记录减 1，已淘汰项从数据库清除)");
@@ -198,7 +199,10 @@ pub fn start(app: AppHandle) {
         // TEST 7: Win32 原生剪贴板格式写入与校验 (Clipboard Service)
         // --------------------------------------------------------------------
         print!("  [7/{}] 验证 Win32 原生剪贴板写入能力... ", total);
-        let magic_text = format!("[SELFTEST-{:x}] Windows Paste Native Test", start_time.elapsed().as_micros());
+        let magic_text = format!(
+            "[SELFTEST-{:x}] Windows Paste Native Test",
+            start_time.elapsed().as_micros()
+        );
         let test_item = crate::model::ClipboardItem {
             id: 999999,
             item_type: ClipboardItemType::Text,
@@ -209,10 +213,12 @@ pub fn start(app: AppHandle) {
             pinned: false,
             tag: None,
         };
-        let blobs_dir = {
-            let guard = state.lock().unwrap();
-            guard.paths.blobs.clone()
-        };
+
+        // blob 目录：自检跑在临时目录里，从环境拿不到就直接用当前 exe 同级的 blobs。
+        // 文本条目用不到它，所以这里允许退化成临时目录。
+        let blobs_dir = std::env::temp_dir().join("WindowsPaste-selftest-blobs");
+        let _ = std::fs::create_dir_all(&blobs_dir);
+
         crate::paste::PasteService::write_to_clipboard(&test_item, &blobs_dir);
         thread::sleep(Duration::from_millis(30));
 
@@ -263,40 +269,40 @@ pub fn start(app: AppHandle) {
         // TEST 9: 卡片分类 Tag 设置与动态筛选 (Tag Management & Filter)
         // --------------------------------------------------------------------
         print!("  [9/{}] 验证卡片分类 Tag 设置与按 Tag 筛选... ", total);
-        let tag_target = {
-            let guard = state.lock().unwrap();
-            guard.items.first().map(|i| i.id)
-        };
+        let tag_target = handle.snapshot().and_then(|s| s.items.first().map(|i| i.id));
+
         let mut test9_ok = false;
         if let Some(target_id) = tag_target {
-            let _ = dispatch(
-                app.clone(),
-                app.state::<SharedState>(),
-                HostRequest::SetTag { item_id: target_id, tag: Some("自动化分类".to_string()) },
-            );
-            let tag_saved = {
-                let guard = state.lock().unwrap();
-                guard.all_tags.contains(&"自动化分类".to_string())
-                    && guard.items.iter().any(|i| i.id == target_id && i.tag.as_deref() == Some("自动化分类"))
-            };
+            let tag_name = "自动化分类".to_string();
+            send(HostRequest::SetTag {
+                item_id: target_id,
+                tag: Some(tag_name.clone()),
+            });
+            let tag_saved = handle
+                .snapshot()
+                .map(|s| {
+                    s.items.iter().any(|i| {
+                        i.id == target_id && i.tag.as_deref() == Some(tag_name.as_str())
+                    })
+                })
+                .unwrap_or(false);
 
             // 测试按 Tag 过滤
-            let _ = dispatch(
-                app.clone(),
-                app.state::<SharedState>(),
-                HostRequest::FilterTag { tag: Some("自动化分类".to_string()) },
-            );
-            let filter_ok = {
-                let guard = state.lock().unwrap();
-                !guard.items.is_empty() && guard.items.iter().all(|i| i.tag.as_deref() == Some("自动化分类"))
-            };
+            send(HostRequest::FilterTag {
+                tag: Some(tag_name.clone()),
+            });
+            let filter_ok = handle
+                .snapshot()
+                .map(|s| {
+                    !s.items.is_empty()
+                        && s.items
+                            .iter()
+                            .all(|i| i.tag.as_deref() == Some(tag_name.as_str()))
+                })
+                .unwrap_or(false);
 
             // 恢复全量过滤
-            let _ = dispatch(
-                app.clone(),
-                app.state::<SharedState>(),
-                HostRequest::FilterTag { tag: None },
-            );
+            send(HostRequest::FilterTag { tag: None });
             test9_ok = tag_saved && filter_ok;
         }
         if test9_ok {
@@ -313,38 +319,34 @@ pub fn start(app: AppHandle) {
         // 这是之前那个 bug 的回归测试：列数 > 4 时上下键会退化成左右移动一格。
         let mut test10_ok = true;
         for columns in [5usize, 2usize, 8usize] {
-            let _ = dispatch(
-                app.clone(),
-                app.state::<SharedState>(),
-                HostRequest::Columns { columns: columns as i64 },
-            );
+            send(HostRequest::Columns {
+                columns: columns as i64,
+            });
 
-            let (first_id, len) = {
-                let guard = state.lock().unwrap();
-                (guard.items[0].id, guard.items.len())
+            let Some(snap) = handle.snapshot() else {
+                test10_ok = false;
+                break;
             };
+            let Some(first) = snap.items.first().map(|i| i.id) else {
+                test10_ok = false;
+                break;
+            };
+            let len = snap.item_count;
 
-            let _ = dispatch(
-                app.clone(),
-                app.state::<SharedState>(),
-                HostRequest::Select { item_id: first_id },
-            );
+            send(HostRequest::Select { item_id: first });
             // delta = 4 表示"向下一行"，与具体列数无关
-            let _ = dispatch(
-                app.clone(),
-                app.state::<SharedState>(),
-                HostRequest::Move { delta: 4 },
-            );
+            send(HostRequest::Move { delta: 4 });
 
-            let landed = {
-                let guard = state.lock().unwrap();
-                let selected = guard.selected_id;
-                guard
-                    .items
-                    .iter()
-                    .position(|i| Some(i.id) == selected)
-                    .unwrap_or(0)
-            };
+            let landed = handle
+                .snapshot()
+                .map(|s| {
+                    let selected = s.selected_id;
+                    s.items
+                        .iter()
+                        .position(|i| Some(i.id) == selected)
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0);
 
             let expected = columns.min(len.saturating_sub(1));
             if landed != expected {
@@ -366,11 +368,17 @@ pub fn start(app: AppHandle) {
         let elapsed = start_time.elapsed();
         println!("--------------------------------------------------------");
         if passed == total {
-            println!("  测试结果：全部通过 (Passed: {}/{}) 耗时: {:.2?}", passed, total, elapsed);
+            println!(
+                "  测试结果：全部通过 (Passed: {}/{}) 耗时: {:.2?}",
+                passed, total, elapsed
+            );
             println!("========================================================\n");
             std::process::exit(0);
         } else {
-            println!("  测试结果：存在失败项 (Passed: {}/{}) 耗时: {:.2?}", passed, total, elapsed);
+            println!(
+                "  测试结果：存在失败项 (Passed: {}/{}) 耗时: {:.2?}",
+                passed, total, elapsed
+            );
             println!("========================================================\n");
             std::process::exit(1);
         }

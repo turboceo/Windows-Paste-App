@@ -1,6 +1,13 @@
-//! Shared application state and DTO conversion for the Tauri command layer.
-
-use std::sync::Mutex;
+//! 应用状态：**由单一线程独占**，不再放在 Mutex 里。
+//!
+//! 为什么去掉锁：
+//! 原来的设计是 `Mutex<AppState>`，剪贴板线程持锁做"写库 → 全表重查 → 序列化
+//! → emit"，而 emit 需要主线程参与；主线程此时正等同一把锁去唤出面板。
+//! 两边互等，就是永久卡死。
+//!
+//! 现在 `AppState` 只属于 `state_worker` 线程（见 `worker.rs`）。任何想操作
+//! 它的地方都往 channel 里投一条消息，由那个线程串行处理。没有锁，
+//! 因此没有死锁、没有锁中毒、也没有锁竞争。
 
 use serde::{Deserialize, Serialize};
 
@@ -72,9 +79,15 @@ impl AppState {
         let id = self.selected_id?;
         self.items.iter().find(|i| i.id == id).cloned()
     }
-}
 
-pub type SharedState = Mutex<AppState>;
+    /// 按 id 取一条记录的副本。
+    ///
+    /// 需要把数据带到 owner 线程之外时用它——比如粘贴要先把条目读出来，
+    /// 之后的写剪贴板、注入按键都不该占着 owner 线程。
+    pub fn item_by_id(&self, id: i64) -> Option<ClipboardItem> {
+        self.items.iter().find(|i| i.id == id).cloned()
+    }
+}
 
 /// 卡片缩略图的目标边长（物理像素）。
 ///
@@ -86,6 +99,9 @@ const THUMBNAIL_EDGE: u32 = 480;
 /// 没有这个缓存的话，每一次推送（搜索、置顶、新增）都会把列表里所有图片
 /// 重新解码一遍——这正是之前 base64 方案卡顿的根源。缓存之后同一张图只算一次，
 /// 从「每次推送 N 张」降到「整个进程生命周期每张一次」。
+///
+/// 缩略图缓存是独立的，不受 AppState 归属影响，所以仍然用一把小锁——
+/// 它只保护纯内存哈希表，临界区极短，且调用方都在 owner 线程上，不存在竞争。
 fn thumbnail_cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, Option<String>>> {
     static CACHE: std::sync::OnceLock<
         std::sync::Mutex<std::collections::HashMap<String, Option<String>>>,
@@ -151,6 +167,11 @@ fn build_thumbnail(blobs_dir: &std::path::Path, file_name: &str) -> Option<Strin
     Some(format!("data:image/png;base64,{}", encoded))
 }
 
+/// 按 blob 文件名取缩略图 data URL，供 `HostRequest::LoadThumbnail` 使用。
+pub fn thumbnail_for_blob(blobs_dir: &std::path::Path, file_name: &str) -> Option<String> {
+    thumbnail_data_url(blobs_dir, file_name)
+}
+
 /// One history entry as delivered to the React UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -174,11 +195,6 @@ impl ClipItemDto {
     ///
     /// 列表里**不带图片数据**，只给一个 `has_image` 标记；缩略图由前端对
     /// 可见的卡片单独调用 `LoadThumbnail` 拉取。
-    ///
-    /// 为什么这么做：列表推送每次都是全表。如果每条图片都内嵌一张几十 KB 的
-    /// data URL，500 条里几十张图就是几 MB 的 JSON，每次搜索、每次新增、每次
-    /// 唤出面板都要重新序列化并跨 IPC 传一遍。表越大越慢——这正是"用久了
-    /// 就唤不出来"的放大器。现在推送负载与图片数量无关。
     pub fn from_item(item: &ClipboardItem, _blobs_dir: &std::path::Path) -> Self {
         let has_image = matches!(item.item_type, ClipboardItemType::Image)
             && item.blob_path.is_some();
@@ -196,12 +212,6 @@ impl ClipItemDto {
             has_image,
         }
     }
-
-}
-
-/// 按 blob 文件名取缩略图 data URL，供 `HostRequest::LoadThumbnail` 使用。
-pub fn thumbnail_for_blob(blobs_dir: &std::path::Path, file_name: &str) -> Option<String> {
-    thumbnail_data_url(blobs_dir, file_name)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -268,7 +278,6 @@ mod tests {
         // 列表 DTO 只有标记，不含图片数据：
         // 这是"用久了推送越来越大"的根源，也是唤出变慢的放大器。
         assert!(dto.has_image, "图片条目必须带 has_image 标记");
-        // 序列化后的 JSON 里不应出现 base64 大字段
         let json = serde_json::to_string(&dto).expect("serialize dto");
         assert!(
             !json.contains("base64"),

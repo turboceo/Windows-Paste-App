@@ -9,6 +9,7 @@ pub mod db;
 pub mod exporter;
 pub mod filedialog;
 pub mod hotkey;
+pub mod logging;
 pub mod model;
 pub mod paste;
 pub mod selftest;
@@ -16,16 +17,15 @@ pub mod single_instance;
 pub mod state;
 pub mod tray;
 pub mod window_util;
-
-use std::sync::Mutex;
+pub mod worker;
 
 use tauri::{Manager, WindowEvent};
 
 use crate::clipboard::{ClipboardMonitor, ClipboardSniffer};
-use crate::commands::{emit_push, push_items, push_selection};
+use crate::commands::emit_push;
 use crate::db::AppPaths;
 use crate::single_instance::InstanceGuard;
-use crate::state::{AppState, SharedState};
+use crate::state::AppState;
 
 pub use crate::state::HISTORY_CAPACITY;
 
@@ -99,7 +99,20 @@ pub fn run() {
         seed_sample_data(&paths, count.clamp(1, 1000));
     }
 
-    let state = Mutex::new(AppState::new(paths));
+    // AppState 不再放进 Mutex，而是交给专属的 owner 线程独占。
+    // 详见 worker.rs 顶部的说明：这是消除"运行一段时间后假死"的根本改动。
+    //
+    // blob 目录在构造状态前先取一份：剪贴板监听线程要用它做捕获，
+    // 而那时候状态已经归 owner 线程所有，不能再去问它要。
+    let initial_blobs_dir = paths.blobs.clone();
+    // 还要留一份完整路径：启动时扫孤儿文件要用独立连接，不走 owner 线程
+    let initial_paths = paths.clone();
+
+    // 日志要尽早初始化：release 构建是 GUI 程序，没有控制台，
+    // 所有 println! / eprintln! 都会被直接丢弃。没有日志就没有排查依据。
+    logging::init(&initial_paths);
+
+    let initial_state = AppState::new(paths);
 
     // Debug helper: `--show`、`--seed` 或 `--selftest` 立即打开面板。
     // `--seed` 现在写的是临时库，不自动显示就没有意义了。
@@ -108,10 +121,13 @@ pub fn run() {
         || is_selftest;
 
     tauri::Builder::default()
-        .manage(state)
         .invoke_handler(tauri::generate_handler![commands::dispatch])
         .setup(move |app| {
             let handle: tauri::AppHandle = app.handle().clone();
+
+            // 启动 owner 线程，之后所有状态操作都通过它串行执行
+            let state_handle = worker::spawn(handle.clone(), initial_state);
+            app.manage(state_handle);
 
             // Native window polish: square corners, centered on the cursor monitor.
             if let Some(window) = app.get_webview_window("main") {
@@ -142,46 +158,39 @@ pub fn run() {
             // 启动时自愈：清掉 blobs/ 里没有任何记录引用的孤立文件。
             // 历史版本在 delete / clear 之后没有删文件，这些是真实的磁盘泄漏。
             //
-            // 注意 lock() 的结果要先绑定再 if let：直接 `if let Ok(g) = state.lock()`
-            // 会让临时 Result 活到代码块末尾，比 sweep_state 更晚 drop，编译不过。
-            {
-                let sweep_state = handle.state::<SharedState>();
-                let locked = sweep_state.lock();
-                if let Ok(guard) = locked {
-                    let removed = crate::db::sweep_orphan_blobs(&guard.db, &guard.paths.blobs);
-                    if removed > 0 {
-                        println!("[windows-paste] 清理孤立图片文件 {} 个", removed);
-                    }
+            // 这里开一个**独立的只读连接**来做扫描，不去打扰 owner 线程。
+            // 启动阶段没必要为了清理几个文件而让状态线程排队。
+            if let Ok(sweep_db) = crate::db::Database::open_with_blobs(
+                &initial_paths.db,
+                HISTORY_CAPACITY,
+                initial_paths.blobs.clone(),
+            ) {
+                let removed = crate::db::sweep_orphan_blobs(&sweep_db, &initial_paths.blobs);
+                if removed > 0 {
+                    crate::logging::log(&format!("清理孤立图片文件 {} 个", removed));
                 }
             }
 
             // Clipboard listener (WM_CLIPBOARDUPDATE on a dedicated Win32 thread).
             //
-            // 这个闭包由 clipboard.rs 的**工作线程**调用（不是窗口过程），
-            // 所以在这里持锁做耗时工作不会堵住剪贴板消息循环。
+            // 这个闭包由 clipboard.rs 的**工作线程**调用（不是窗口过程）。
+            //
+            // 注意这里没有锁可用，也不需要：捕获过程（读剪贴板、解码 DIB、
+            // 写 PNG）全部在本地完成，只依赖 blob 目录这一个路径。拿到结果后
+            // 把条目投递给 owner 线程入库即可。
+            //
+            // blob 目录是启动时固定的，不再需要向状态要——省掉一次跨线程往返。
             let clip_handle = handle.clone();
+            let clip_blobs = initial_blobs_dir.clone();
             ClipboardMonitor::new().start(move || {
-                let state = clip_handle.state::<SharedState>();
-
-                // 先把要用的路径取出来，**立刻释放锁**再去做解码/写盘。
-                // 锁只保护内存状态，不应该被 IO 和图片解码占着。
-                let blobs_dir = {
-                    let guard = commands::lock(&state);
-                    guard.paths.blobs.clone()
-                };
-
-                let captured = ClipboardSniffer::new(&blobs_dir).capture();
-                let Some(mut item) = captured else {
+                let captured = ClipboardSniffer::new(&clip_blobs).capture();
+                let Some(item) = captured else {
                     return;
                 };
 
-                let mut guard = commands::lock(&state);
-                // 两种情况都会改变列表顺序：新增是插到最前，
-                // 重复是"触摸"已有条目把它提上来。
-                if guard.db.add(&mut item).is_ok() {
-                    guard.reload();
-                    push_items(&clip_handle, &guard);
-                    push_selection(&clip_handle, &guard);
+                // 投递后立刻返回：hot 路径上不再有任何阻塞调用
+                if let Some(state) = clip_handle.try_state::<worker::StateHandle>() {
+                    state.send(worker::Command::Captured(item));
                 }
             });
 
@@ -226,12 +235,17 @@ pub fn run() {
 
             // System tray: 只负责唤出面板与退出。
             // 导入 / 导出 / 清空历史是低频且需要确认的操作，入口放在界面里。
+            //
+            // 注意托盘用的是 `show_panel` 而**不是** `toggle_panel`。
+            // 菜单项写的是"唤起剪贴板"，语义就该永远是"叫到前面来"。
+            // 用 toggle 的话，面板恰好还可见时会被隐藏——用户看到的就是
+            // "点了没反应"，而且这种情况在长时间不操作时特别容易出现。
             let tray_show = handle.clone();
             let tray_exit = handle.clone();
             tray::TrayIcon::start(tray::TrayActions {
                 on_show: move || {
                     let app = tray_show.clone();
-                    let _ = app.clone().run_on_main_thread(move || toggle_panel(&app));
+                    let _ = app.clone().run_on_main_thread(move || show_panel(&app));
                 },
                 on_exit: move || {
                     let app = tray_exit.clone();
@@ -290,7 +304,7 @@ pub fn show_panel(app: &tauri::AppHandle) {
 
     // 已经可见**且**在前台时才只把焦点要回来，不重复刷新、不重新居中——
     // 否则每次双击图标面板都会"跳"一下。
-    // 可见但丢了焦点的情况要走完整流程：重新居中、重新 show。
+    // 可见但丢了焦点的情况要走完整流程：重新居中、重新 show、抢前台。
     if window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false) {
         let _ = window.set_focus();
         return;
@@ -299,28 +313,26 @@ pub fn show_panel(app: &tauri::AppHandle) {
     // Remember the foreground window so the paste lands in the right place.
     let foreground = paste::PasteService::get_foreground_window();
 
-    // 先把窗口亮出来，再去碰需要加锁的状态。
+    // 主线程上只做窗口操作，**不等任何状态**。
     //
-    // 顺序很关键：这段代码跑在主线程上。如果先 `lock()` 再做 reload + 全表序列化，
-    // 而恰好有别的线程正持着锁（剪贴板刚捕获到内容、或正在导入），
-    // 主线程就会在窗口显示之前被挡住 —— 用户看到的就是"按了热键没反应"。
-    // 先 show 再刷新，最坏情况也只是列表晚几十毫秒更新，而不是面板不出来。
+    // 以前这里要拿锁做 reload + 全表序列化，而那段代码跑在主线程上，
+    // 一旦别的线程正持着锁，窗口就会迟迟显示不出来——用户看到的就是
+    // "按了热键没反应"。现在数据刷新改成投递一条命令，主线程立刻返回。
     window_util::center_on_cursor(&window);
     let _ = window.show();
+    // 把窗口提到 Z 序最前并强制抢焦点。
+    //
+    // 单靠 `set_focus()` 不够：Windows 有前台锁（foreground lock），
+    // 一个后台进程不能随便把窗口切到前台，`SetForegroundWindow` 会返回
+    // false 而什么都不发生。这正是"托盘点了没反应、但窗口其实还在"的成因。
+    window_util::force_foreground(&window);
     let _ = window.set_focus();
 
-    if let Some(state) = app.try_state::<SharedState>() {
-        // 中毒也要恢复：唤出面板是核心功能，不能因为一次旧 panic 就永久失效
-        let mut guard = commands::lock(&state);
-        guard.last_target_hwnd = foreground as isize;
-        guard.search_text.clear();
-        guard.active_tag = None;
-        guard.reload();
-        push_items(app, &guard);
-        push_selection(app, &guard);
-        // 单独发一次重置：搜索词只在"唤出面板"这一刻归零，
-        // 不能混在 items 推送里，否则剪贴板线程的推送会把用户正在敲的字擦掉。
-        emit_push(app, serde_json::json!({ "type": "reset" }));
+    // 记下呼出前的目标窗口 + 清空筛选 + 刷新列表，一并交给 owner 线程
+    if let Some(state) = app.try_state::<worker::StateHandle>() {
+        state.send(worker::Command::Summoned {
+            target_hwnd: foreground as isize,
+        });
     }
 }
 
