@@ -215,20 +215,6 @@ body {
   color: #1d4ed8;
 }
 
-/* 版本号：刻意低调，不抢计数徽章的注意力 */
-.version-badge {
-  display: inline-flex;
-  align-items: center;
-  font-family: 'Cascadia Mono', 'Consolas', ui-monospace, monospace;
-  font-size: 10.5px;
-  font-weight: 500;
-  color: var(--text-dim);
-  letter-spacing: 0.01em;
-  user-select: text;
-  cursor: default;
-  opacity: 0.8;
-}
-
 .drag-region {
   flex: 1 1 auto;
   height: 100%;
@@ -296,12 +282,102 @@ body {
 
 .visible-grid {
   position: absolute;
+  inset: 0;
+  /* 定位层本身不接收事件，命中交给每张卡片 */
+  pointer-events: none;
+}
+
+/* 卡片按 index 绝对定位：顺序变化时 transform 过渡会自然形成滑动动画 */
+.card-slot {
+  position: absolute;
   top: 0;
   left: 0;
-  right: 0;
-  display: grid;
-  align-content: start;
   pointer-events: auto;
+  transition: transform 190ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
+}
+
+.card-slot .paste-card {
+  cursor: grab;
+}
+
+/* 被拖走的那张留在原位当占位槽，实卡由浮层代替 */
+.card-slot.is-drag-source {
+  pointer-events: none;
+}
+
+.card-slot.is-drag-source > .paste-card {
+  opacity: 0;
+}
+
+.drop-slot {
+  position: absolute;
+  inset: 0;
+  border: 2px dashed rgba(37, 99, 235, 0.5);
+  border-radius: var(--radius-card);
+  background: rgba(37, 99, 235, 0.07);
+  pointer-events: none;
+  animation: drop-slot-pulse 1100ms ease-in-out infinite;
+}
+
+@keyframes drop-slot-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* 跟随指针的浮层。位置由 JS 直接写 transform，保证每帧都跟手 */
+.drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1500;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.drag-ghost .paste-card {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-1.2deg) scale(1.04);
+  transform-origin: center;
+  box-shadow:
+    0 20px 44px rgba(15, 23, 42, 0.24),
+    0 8px 16px rgba(15, 23, 42, 0.12);
+  cursor: grabbing;
+}
+
+/* 落下时给一次轻微的吸附反馈 */
+.card-slot.just-dropped > .paste-card {
+  animation: card-land 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes card-land {
+  0% {
+    transform: scale(1.045);
+  }
+  55% {
+    transform: scale(0.985);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+body.is-dragging-card,
+body.is-dragging-card * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+/* 拖拽时不要让光标经过的卡片再抬起来，浮层才是视觉焦点 */
+body.is-dragging-card .card-slot .paste-card:hover {
+  transform: none;
+  box-shadow: var(--card-shadow);
 }
 
 /* ==========================================================================
@@ -1444,11 +1520,6 @@ body {
   .count-badge.filtering {
     background: rgba(122, 174, 255, 0.2);
     color: #a8c8ff;
-  }
-
-  .version-badge {
-    color: var(--text-dim);
-    opacity: 0.9;
   }
 
   .window-control-btn:hover {

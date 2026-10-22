@@ -53,6 +53,7 @@ export type HostRequest =
   | { type: 'delete'; itemId: number }
   | { type: 'togglePin'; itemId: number }
   | { type: 'setTag'; itemId: number; tag: string | null }
+  | { type: 'reorder'; itemId: number; beforeId: number | null }
   | { type: 'filterTag'; tag: string | null }
   | { type: 'deleteTag'; tag: string }
   | { type: 'columns'; columns: number }

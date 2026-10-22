@@ -150,13 +150,18 @@ impl Database {
                 Hash      TEXT    NOT NULL,
                 CreatedAt TEXT    NOT NULL,
                 Pinned    INTEGER NOT NULL DEFAULT 0,
-                Tag       TEXT    NULL
+                Tag       TEXT    NULL,
+                SortOrder REAL    NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS IX_ClipboardItems_Hash ON ClipboardItems(Hash);
             CREATE INDEX IF NOT EXISTS IX_ClipboardItems_CreatedAt ON ClipboardItems(CreatedAt DESC);",
         )?;
         // 平滑升级兼容已有库
         let _ = self.conn.execute("ALTER TABLE ClipboardItems ADD COLUMN Tag TEXT NULL", []);
+        let _ = self.conn.execute(
+            "ALTER TABLE ClipboardItems ADD COLUMN SortOrder REAL NOT NULL DEFAULT 0",
+            [],
+        );
         let _ = self.conn.execute("CREATE INDEX IF NOT EXISTS IX_ClipboardItems_Tag ON ClipboardItems(Tag);", []);
         Ok(())
     }
@@ -184,8 +189,10 @@ impl Database {
     /// 同时这也让"同一次复制触发两三次 WM_CLIPBOARDUPDATE"天然幂等。
     pub fn add(&mut self, item: &mut ClipboardItem) -> Result<AddOutcome> {
         if let Some(existing_id) = self.find_id_by_hash(&item.hash)? {
+            // "提到最前"要同时重置手动排序：否则一条被拖到后面的记录，
+            // 即使重新复制也不会回到顶部，和用户的直觉相反。
             self.conn.execute(
-                "UPDATE ClipboardItems SET CreatedAt = ?1 WHERE Id = ?2",
+                "UPDATE ClipboardItems SET CreatedAt = ?1, SortOrder = 0 WHERE Id = ?2",
                 params![item.created_at.to_rfc3339(), existing_id],
             )?;
             item.id = existing_id;
@@ -267,7 +274,7 @@ impl Database {
         let mut stmt = self.conn.prepare(
             "SELECT Id, Type, Content, BlobPath, Hash, CreatedAt, Pinned, Tag
              FROM ClipboardItems
-             ORDER BY Pinned DESC, CreatedAt DESC, Id DESC",
+             ORDER BY Pinned DESC, SortOrder ASC, CreatedAt DESC, Id DESC",
         )?;
         let rows = stmt.query_map([], |row| Self::parse_row(row))?;
         let mut items = Vec::new();
@@ -296,7 +303,7 @@ impl Database {
                     "SELECT Id, Type, Content, BlobPath, Hash, CreatedAt, Pinned, Tag
                      FROM ClipboardItems
                      WHERE Content LIKE ?1
-                     ORDER BY Pinned DESC, CreatedAt DESC, Id DESC
+                     ORDER BY Pinned DESC, SortOrder ASC, CreatedAt DESC, Id DESC
                      LIMIT 200",
                 )?;
                 let rows = stmt.query_map(params![pattern], |row| Self::parse_row(row))?;
@@ -307,7 +314,7 @@ impl Database {
                     "SELECT Id, Type, Content, BlobPath, Hash, CreatedAt, Pinned, Tag
                      FROM ClipboardItems
                      WHERE Tag = ?1
-                     ORDER BY Pinned DESC, CreatedAt DESC, Id DESC
+                     ORDER BY Pinned DESC, SortOrder ASC, CreatedAt DESC, Id DESC
                      LIMIT 200",
                 )?;
                 let rows = stmt.query_map(params![tag], |row| Self::parse_row(row))?;
@@ -319,7 +326,7 @@ impl Database {
                     "SELECT Id, Type, Content, BlobPath, Hash, CreatedAt, Pinned, Tag
                      FROM ClipboardItems
                      WHERE Tag = ?1 AND Content LIKE ?2
-                     ORDER BY Pinned DESC, CreatedAt DESC, Id DESC
+                     ORDER BY Pinned DESC, SortOrder ASC, CreatedAt DESC, Id DESC
                      LIMIT 200",
                 )?;
                 let rows = stmt.query_map(params![tag, pattern], |row| Self::parse_row(row))?;
@@ -392,6 +399,52 @@ impl Database {
             "UPDATE ClipboardItems SET Pinned = ?1 WHERE Id = ?2",
             params![if pinned { 1 } else { 0 }, id],
         )?;
+        Ok(())
+    }
+
+    /// 把一条记录移动到 `before_id` 之前；`None` 表示移到所在分组的末尾。
+    ///
+    /// 只重排被拖拽项所属的分组（置顶 / 未置顶）——列表里这两段永远前后分开，
+    /// 跨组拖动没有意义。顺序每次按 0..N 重新编号写回，而不是取两个邻居的
+    /// 浮点中点：中点会被反复二分，最终耗尽精度。
+    pub fn reorder(&mut self, item_id: i64, before_id: Option<i64>) -> Result<()> {
+        if before_id == Some(item_id) {
+            return Ok(());
+        }
+
+        // 先确认条目存在，同时拿到它属于哪一段
+        let pinned: i32 = self.conn.query_row(
+            "SELECT Pinned FROM ClipboardItems WHERE Id = ?1",
+            params![item_id],
+            |row| row.get(0),
+        )?;
+
+        let mut ids: Vec<i64> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT Id FROM ClipboardItems
+                 WHERE Pinned = ?1
+                 ORDER BY SortOrder ASC, CreatedAt DESC, Id DESC",
+            )?;
+            let rows = stmt.query_map(params![pinned], |row| row.get(0))?;
+            rows.flatten().collect()
+        };
+        ids.retain(|id| *id != item_id);
+
+        // before_id 不在本组（例如拖到了另一段）时退化为"放到本组末尾"，
+        // 而不是把记录插到分组外面去。
+        let insert_at = before_id
+            .and_then(|target| ids.iter().position(|id| *id == target))
+            .unwrap_or(ids.len());
+        ids.insert(insert_at, item_id);
+
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare("UPDATE ClipboardItems SET SortOrder = ?1 WHERE Id = ?2")?;
+            for (index, id) in ids.iter().enumerate() {
+                stmt.execute(params![index as f64, id])?;
+            }
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -745,6 +798,84 @@ mod tests {
             Some("工作"),
             "本地已有的分类必须保留"
         );
+    }
+
+    /// 列表当前顺序（按 content 取），用于断言拖拽排序结果。
+    fn contents(db: &Database) -> Vec<String> {
+        db.get_all()
+            .unwrap()
+            .into_iter()
+            .map(|item| item.content)
+            .collect()
+    }
+
+    #[test]
+    fn test_reorder_persists_and_keeps_new_items_on_top() {
+        let root = std::env::temp_dir().join(format!("test_wp_reorder_{}", std::process::id()));
+        let _ = fs::create_dir_all(&root);
+        let mut db = Database::open(&root.join("test.db"), 100).expect("open db");
+
+        let mut a = sample("reorder-a", "A", false, None);
+        a.created_at = Local::now() - chrono::Duration::seconds(30);
+        let mut b = sample("reorder-b", "B", false, None);
+        b.created_at = Local::now() - chrono::Duration::seconds(20);
+        let mut c = sample("reorder-c", "C", false, None);
+        c.created_at = Local::now() - chrono::Duration::seconds(10);
+        db.add(&mut a).unwrap();
+        db.add(&mut b).unwrap();
+        db.add(&mut c).unwrap();
+        assert_eq!(contents(&db), vec!["C", "B", "A"], "默认按时间倒序");
+
+        // 把最早的 A 拖到 C 前面
+        db.reorder(a.id, Some(c.id)).unwrap();
+        assert_eq!(contents(&db), vec!["A", "C", "B"]);
+
+        // 手动排序后，新内容仍然出现在最前（SortOrder 默认 0，时间更新）
+        let mut d = sample("reorder-d", "D", false, None);
+        db.add(&mut d).unwrap();
+        assert_eq!(contents(&db), vec!["D", "A", "C", "B"]);
+
+        // 重新复制 B：touch 语义要同时重置手动排序，否则回不到顶部
+        let mut b_again = b.clone();
+        b_again.created_at = Local::now() + chrono::Duration::seconds(5);
+        assert_eq!(db.add(&mut b_again).unwrap(), AddOutcome::Touched);
+        assert_eq!(contents(&db), vec!["B", "D", "A", "C"]);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_reorder_respects_pinned_group() {
+        let root = std::env::temp_dir().join(format!("test_wp_reorder_pin_{}", std::process::id()));
+        let _ = fs::create_dir_all(&root);
+        let mut db = Database::open(&root.join("test.db"), 100).expect("open db");
+
+        let mut a = sample("rp-a", "A", false, None);
+        a.created_at = Local::now() - chrono::Duration::seconds(30);
+        let mut b = sample("rp-b", "B", false, None);
+        b.created_at = Local::now() - chrono::Duration::seconds(20);
+        let mut c = sample("rp-c", "C", false, None);
+        c.created_at = Local::now() - chrono::Duration::seconds(10);
+        let mut p = sample("rp-p", "P", true, None);
+        p.created_at = Local::now() - chrono::Duration::seconds(40);
+        for item in [&mut a, &mut b, &mut c, &mut p] {
+            db.add(item).unwrap();
+        }
+        assert_eq!(contents(&db), vec!["P", "C", "B", "A"]);
+
+        // 未置顶段内移动：C 拖到 A 前面 → B, C, A
+        db.reorder(c.id, Some(a.id)).unwrap();
+        assert_eq!(contents(&db), vec!["P", "B", "C", "A"]);
+
+        // 拖拽项不会越出自己所在的分组：置顶段只有 P，移到末尾仍排第一
+        db.reorder(p.id, None).unwrap();
+        assert_eq!(contents(&db), vec!["P", "B", "C", "A"]);
+
+        // 指向另一组的 before_id 退化为"本组末尾"，不会把置顶项挤下去
+        db.reorder(p.id, Some(a.id)).unwrap();
+        assert_eq!(contents(&db), vec!["P", "B", "C", "A"]);
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

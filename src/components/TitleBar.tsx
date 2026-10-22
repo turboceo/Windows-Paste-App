@@ -1,6 +1,4 @@
-import { useEffect, useState } from 'react'
-import { getVersion } from '@tauri-apps/api/app'
-import { isHosted, send } from '../bridge'
+import { send } from '../bridge'
 
 interface TitleBarProps {
   isMaximized: boolean
@@ -10,25 +8,6 @@ interface TitleBarProps {
 
 /** Frameless-window title bar with the app brand, count badge and controls. */
 export default function TitleBar({ isMaximized, totalCount, filteredCount }: TitleBarProps) {
-  // 版本号从打包配置（tauri.conf.json 的 version）读，不在代码里另存一份，
-  // 免得发版时改了一处忘了另一处。
-  const [version, setVersion] = useState('')
-
-  useEffect(() => {
-    if (!isHosted()) return
-    let cancelled = false
-    getVersion()
-      .then((v) => {
-        if (!cancelled) setVersion(v)
-      })
-      .catch(() => {
-        // 读不到就不显示，不影响其它功能
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
   const isFiltering = filteredCount !== totalCount
 
   const badgeText =
@@ -58,11 +37,6 @@ export default function TitleBar({ isMaximized, totalCount, filteredCount }: Tit
         <span className={`count-badge${isFiltering ? ' filtering' : ''}`} title={badgeTitle}>
           {badgeText}
         </span>
-        {version && (
-          <span className="version-badge" title={`Windows Paste v${version}`}>
-            v{version}
-          </span>
-        )}
       </div>
 
       <div className="drag-region" />

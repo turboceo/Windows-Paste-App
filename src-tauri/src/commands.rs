@@ -49,6 +49,13 @@ pub enum HostRequest {
         item_id: i64,
         tag: Option<String>,
     },
+    /// 拖拽排序：把记录移动到 `before_id` 之前；`None` 表示移到本组末尾。
+    #[serde(rename_all = "camelCase")]
+    Reorder {
+        #[serde(alias = "item_id")]
+        item_id: i64,
+        before_id: Option<i64>,
+    },
     #[serde(rename_all = "camelCase")]
     FilterTag {
         tag: Option<String>,
@@ -196,6 +203,16 @@ pub fn handle(app: &AppHandle, state: &mut AppState, req: HostRequest) {
             state.reload();
             push_items(app, state);
             push_selection(app, state);
+        }
+        HostRequest::Reorder { item_id, before_id } => {
+            // 顺序变化本身不改变任何条目内容，失败（例如条目已被删掉）时
+            // 保持原样即可，不需要额外提示。
+            if state.db.reorder(item_id, before_id).is_ok() {
+                state.selected_id = Some(item_id);
+                state.reload();
+                push_items(app, state);
+                push_selection(app, state);
+            }
         }
         HostRequest::FilterTag { tag } => {
             state.active_tag = tag;
@@ -498,6 +515,20 @@ mod tests {
         let preview_json = r#"{"type":"previewImport","path":"C:\\temp\\clip.json"}"#;
         let preview_res: Result<HostRequest, _> = serde_json::from_str(preview_json);
         assert!(matches!(preview_res, Ok(HostRequest::PreviewImport { .. })));
+
+        let reorder_json = r#"{"type":"reorder","itemId":3,"beforeId":7}"#;
+        let reorder_res: Result<HostRequest, _> = serde_json::from_str(reorder_json);
+        assert!(matches!(
+            reorder_res,
+            Ok(HostRequest::Reorder { item_id: 3, before_id: Some(7) })
+        ));
+
+        let reorder_end = r#"{"type":"reorder","itemId":3,"beforeId":null}"#;
+        let reorder_end_res: Result<HostRequest, _> = serde_json::from_str(reorder_end);
+        assert!(matches!(
+            reorder_end_res,
+            Ok(HostRequest::Reorder { item_id: 3, before_id: None })
+        ));
     }
 
     #[test]

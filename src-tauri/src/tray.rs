@@ -14,9 +14,9 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
     DispatchMessageW, GetCursorPos, GetMessageW, LoadIconW, PostQuitMessage, RegisterClassW,
-    SetForegroundWindow, TrackPopupMenu, TranslateMessage, HICON, IDI_APPLICATION, MF_SEPARATOR,
-    MF_STRING, MSG, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_APP,
-    WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_RBUTTONUP, WNDCLASSW,
+    SetForegroundWindow, TrackPopupMenu, TranslateMessage, HICON, IDI_APPLICATION, MF_GRAYED,
+    MF_SEPARATOR, MF_STRING, MSG, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+    WM_APP, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_RBUTTONUP, WNDCLASSW,
 };
 
 use crate::clipboard::wide_str;
@@ -29,6 +29,11 @@ type TrayCallback = Arc<dyn Fn() + Send + Sync + 'static>;
 
 static TRAY_SHOW: Mutex<Option<TrayCallback>> = Mutex::new(None);
 static TRAY_EXIT: Mutex<Option<TrayCallback>> = Mutex::new(None);
+/// 版本号文案的持有者。
+///
+/// 菜单是在 `tray_wnd_proc`（静态回调）里现建的，拿不到 `TrayIcon::start`
+/// 的局部变量，所以在这里留一份。只在启动时写一次、右键时读一次。
+static TRAY_VERSION: Mutex<Option<String>> = Mutex::new(None);
 
 /// 托盘菜单的动作集合。
 ///
@@ -36,6 +41,8 @@ static TRAY_EXIT: Mutex<Option<TrayCallback>> = Mutex::new(None);
 /// destructive / 低频操作，放在界面里更合适：那里有确认对话框、能显示进度、
 /// 也不会因为右键点错而误清一整年的记录。
 pub struct TrayActions<FShow, FExit> {
+    /// 显示在右键菜单底部的版本号，来源是 Tauri 的 package info。
+    pub version: String,
     pub on_show: FShow,
     pub on_exit: FExit,
 }
@@ -49,8 +56,11 @@ impl TrayIcon {
         FShow: Fn() + Send + Sync + 'static,
         FExit: Fn() + Send + Sync + 'static,
     {
+        let version = actions.version;
+
         if let Ok(mut l) = TRAY_SHOW.lock() { *l = Some(Arc::new(actions.on_show)); }
         if let Ok(mut l) = TRAY_EXIT.lock() { *l = Some(Arc::new(actions.on_exit)); }
+        if let Ok(mut l) = TRAY_VERSION.lock() { *l = Some(version); }
 
         thread::spawn(move || unsafe {
             let class_name = wide_str("WindowsPaste_TrayWindow");
@@ -274,10 +284,22 @@ unsafe extern "system" fn tray_wnd_proc(
                 let hmenu = CreatePopupMenu();
                 let m_show = wide_str("唤起剪贴板 (&S)\tCtrl+Shift+V");
                 let m_exit = wide_str("退出 Windows Paste (&X)");
+                // 版本号放在菜单底部，作为只读信息项——灰色不可点，
+                // 避免和"退出"挨在一起被误触。
+                let m_version = wide_str(&format!(
+                    "Windows Paste v{}",
+                    TRAY_VERSION
+                        .lock()
+                        .ok()
+                        .and_then(|v| v.clone())
+                        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+                ));
 
                 AppendMenuW(hmenu, MF_STRING, ID_TRAY_SHOW as usize, m_show.as_ptr());
                 AppendMenuW(hmenu, MF_SEPARATOR, 0, std::ptr::null());
                 AppendMenuW(hmenu, MF_STRING, ID_TRAY_EXIT as usize, m_exit.as_ptr());
+                AppendMenuW(hmenu, MF_SEPARATOR, 0, std::ptr::null());
+                AppendMenuW(hmenu, MF_STRING | MF_GRAYED, 0, m_version.as_ptr());
 
                 SetForegroundWindow(hwnd);
                 let cmd = TrackPopupMenu(
