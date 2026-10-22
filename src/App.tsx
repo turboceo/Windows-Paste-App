@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import TitleBar from './components/TitleBar'
+import TagFilterBar from './components/TagFilterBar'
 import CardGrid from './components/CardGrid'
 import ToolBar from './components/ToolBar'
 import ContextMenu, { type ContextMenuState } from './components/ContextMenu'
@@ -8,6 +9,7 @@ import Toast, { type ToastState } from './components/Toast'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { isHosted, onPush, send } from './bridge'
 import type { ClipboardItem, HostPush, ImportPreview } from './types'
+import { loadTagColors, saveTagColors } from './tagColors'
 
 /** 搜索防抖窗口：连续输入合并成一次后端查询。 */
 const SEARCH_DEBOUNCE_MS = 120
@@ -38,6 +40,7 @@ export default function App() {
   const [allTags, setAllTags] = useState<string[]>([])
   const [tagCounts, setTagCounts] = useState<Record<string, number>>({})
   const [activeTag, setActiveTag] = useState<string | null>(null)
+  const [tagColors, setTagColors] = useState<Record<string, string>>(() => loadTagColors())
 
   // toast 与导入确认
   const [toast, setToast] = useState<ToastState>({ visible: false, message: '' })
@@ -245,6 +248,13 @@ export default function App() {
   const onConfirmTagDelete = useCallback(() => {
     if (!pendingTagDelete) return
     send({ type: 'deleteTag', tag: pendingTagDelete })
+    setTagColors((prev) => {
+      if (!prev[pendingTagDelete]) return prev
+      const next = { ...prev }
+      delete next[pendingTagDelete]
+      saveTagColors(next)
+      return next
+    })
     setPendingTagDelete(null)
   }, [pendingTagDelete])
 
@@ -296,6 +306,14 @@ export default function App() {
     send({ type: 'import', path: pendingImport.path })
     setPendingImport(null)
   }, [pendingImport])
+
+  const onSaveTagColor = useCallback((tag: string, color: string) => {
+    setTagColors((prev) => {
+      const next = { ...prev, [tag]: color }
+      saveTagColors(next)
+      return next
+    })
+  }, [])
 
   const onSelect = useCallback((item: ClipboardItem) => {
     setSelectedId(item.id)
@@ -464,32 +482,15 @@ export default function App() {
           </div>
         )}
 
-        {/* 2. 分类 Tag 快捷切换标签栏 */}
-        <div className="tag-filter-bar">
-          <button
-            className={`tag-filter-pill${activeTag === null ? ' active' : ''}`}
-            onClick={() => onFilterTag(null)}
-          >
-            全部
-          </button>
-          {allTags.map((tag) => (
-            <button
-              key={tag}
-              className={`tag-filter-pill${activeTag === tag ? ' active' : ''}`}
-              title={`${tag} · 右键可删除该分类`}
-              onClick={() => onFilterTag(activeTag === tag ? null : tag)}
-              onContextMenu={(event) => {
-                // 右键胶囊直接进入"删除分类"确认流程。
-                // 不用二级菜单：这里只有一个动作，弹菜单反而多一次点击。
-                event.preventDefault()
-                setPendingTagDelete(tag)
-              }}
-            >
-              <span className="tag-glyph">&#xE8EC;</span>
-              {tag}
-            </button>
-          ))}
-        </div>
+        {/* 2. YouTube 风格分类 Tag 快捷切换标签栏 */}
+        <TagFilterBar
+          allTags={allTags}
+          activeTag={activeTag}
+          tagColors={tagColors}
+          onFilterTag={onFilterTag}
+          onSaveTagColor={onSaveTagColor}
+          onDeleteTag={(tag) => setPendingTagDelete(tag)}
+        />
 
         {/* 3. 虚拟卡片网格列表 */}
         <div className="list-area">
@@ -498,6 +499,7 @@ export default function App() {
             thumbnails={thumbnails}
             onRequestThumbnail={onRequestThumbnail}
             selectedId={selectedId}
+            tagColors={tagColors}
             onSelect={onSelect}
             onPaste={onPaste}
             onTogglePin={onTogglePin}
@@ -540,11 +542,13 @@ export default function App() {
         <ContextMenu
           menu={contextMenu}
           allTags={allTags}
+          tagColors={tagColors}
           onClose={onCloseContextMenu}
           onPaste={onPaste}
           onTogglePin={onTogglePin}
           onRemove={onRemove}
           onSetTag={onSetTag}
+          onSaveTagColor={onSaveTagColor}
         />
 
         {/* 6. 导入确认：先告诉用户会发生什么，再写库 */}

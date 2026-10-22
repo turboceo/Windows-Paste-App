@@ -11,6 +11,7 @@ interface ClipCardProps {
   thumbnail: string | null | undefined
   onRequestThumbnail: (itemId: number) => void
   selected: boolean
+  tagColor?: string
   onSelect: (item: ClipboardItem) => void
   onPaste: (item: ClipboardItem) => void
   onTogglePin: (item: ClipboardItem) => void
@@ -28,6 +29,7 @@ export default function ClipCard({
   thumbnail,
   onRequestThumbnail,
   selected,
+  tagColor,
   onSelect,
   onPaste,
   onTogglePin,
@@ -145,7 +147,9 @@ export default function ClipCard({
   const timeLabel = useMemo(() => relativeTime(item.createdAt), [item.createdAt])
 
   return (
-    <div className={`card-shell cat-${semanticCategory}`}>
+    <div
+      className={`card-shell cat-${semanticCategory}${selected ? ' selected' : ''}`}
+    >
       <div
         className={`paste-card cat-${semanticCategory}${selected ? ' selected' : ''}${
           item.pinned ? ' pinned' : ''
@@ -242,7 +246,19 @@ export default function ClipCard({
 
         <footer className="card-foot">
           {item.tag && (
-            <span className="card-tag-pill" title={`分类标签：${item.tag}`}>
+            <span
+              className="card-tag-pill"
+              title={`分类标签：${item.tag}`}
+              style={
+                tagColor
+                  ? {
+                      backgroundColor: `${tagColor}18`,
+                      color: tagColor,
+                      borderColor: `${tagColor}38`,
+                    }
+                  : undefined
+              }
+            >
               <span className="tag-icon">&#xE8EC;</span>
               {item.tag}
             </span>

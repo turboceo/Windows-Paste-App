@@ -8,14 +8,11 @@ const TARGET_CARD_WIDTH = 210
 const GRID_GAP = 16
 /** 卡片高宽比。参考图是竖向长方形，比正方形更能装下一段文字。 */
 const CARD_ASPECT = 1.2
-/** 卡片顶部堆叠边探出的高度，只有行间距需要为它留位置。 */
-const STACK_PEEK = 12
 /**
- * 行间距要比列间距大：每张卡上沿有 12px 的"堆叠边"，
- * 用普通 GRID_GAP 会让上一行的底部和下一行的堆叠边粘在一起。
+ * 顶部留白要容得下悬停时探出的层叠边（约 12px），
+ * 否则第一行的"卡片堆"会被裁掉。
  */
-const ROW_GAP = GRID_GAP + STACK_PEEK
-const PADDING_TOP = 26
+const PADDING_TOP = 22
 const PADDING_BOTTOM = 20
 const PADDING_LEFT = 20
 const PADDING_RIGHT = 20
@@ -64,6 +61,7 @@ interface CardGridProps {
   thumbnails: Record<number, string | null>
   onRequestThumbnail: (itemId: number) => void
   selectedId: number | null
+  tagColors?: Record<string, string>
   onSelect: (item: ClipboardItem) => void
   onPaste: (item: ClipboardItem) => void
   onTogglePin: (item: ClipboardItem) => void
@@ -83,6 +81,7 @@ export default function CardGrid({
   thumbnails,
   onRequestThumbnail,
   selectedId,
+  tagColors,
   onSelect,
   onPaste,
   onTogglePin,
@@ -178,7 +177,7 @@ export default function CardGrid({
     ? Math.max(100, (usable - (columns - 1) * GRID_GAP) / columns)
     : TARGET_CARD_WIDTH
   const cardHeight = Math.round(cardWidth * CARD_ASPECT)
-  const rowStep = cardHeight + ROW_GAP
+  const rowStep = cardHeight + GRID_GAP
 
   /** 指针事件回调里要用最新的布局参数，又不该因此重建监听器。 */
   const geometryRef = useRef({ columns, cardWidth, cardHeight, rowStep })
@@ -192,7 +191,7 @@ export default function CardGrid({
       ? 0
       : PADDING_TOP +
         totalRows * cardHeight +
-        Math.max(0, totalRows - 1) * ROW_GAP +
+        Math.max(0, totalRows - 1) * GRID_GAP +
         PADDING_BOTTOM
 
   let visibleItems: ClipboardItem[] = []
@@ -590,6 +589,7 @@ export default function CardGrid({
                     thumbnail={thumbnails[item.id]}
                     onRequestThumbnail={onRequestThumbnail}
                     selected={item.id === selectedId}
+                    tagColor={tagColors && item.tag ? tagColors[item.tag] : undefined}
                     onSelect={handleSelect}
                     onPaste={onPaste}
                     onTogglePin={onTogglePin}
@@ -617,6 +617,7 @@ export default function CardGrid({
             thumbnail={thumbnails[draggedItem.id]}
             onRequestThumbnail={() => {}}
             selected={false}
+            tagColor={tagColors && draggedItem.tag ? tagColors[draggedItem.tag] : undefined}
             onSelect={() => {}}
             onPaste={() => {}}
             onTogglePin={() => {}}

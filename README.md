@@ -18,7 +18,7 @@
     - 屏幕截图与图像：缩略图铺满正文，底部浮一条半透明胶囊显示像素分辨率；
     - 文件列表：清晰展示包含图标的文件清单与总文件数；
     - 颜色代码：智能识别 `#RGB` / `#RRGGBB` / `rgb(...)`，正文呈现大色块色板，底部显示色值。
-  - **堆叠卡片层次**：卡片上沿探出两层同色薄边，像一叠待取的历史记录；
+  - **堆叠卡片层次**：悬停或选中时卡片上沿探出两层同色薄边，像一叠待取的历史记录；平时收起，列表保持干净；
   - **皇家蓝高对比聚焦外环**：选中时呈现 macOS 风格的 2px `#007aff` 亮蓝环与微浮升效果。
 - **无边框与自适应视口**：
   - 动态自适应计算最佳列数，各行平滑均匀铺满；
@@ -62,12 +62,14 @@
 │   ├── App.tsx                # 主壳层、全局键盘事件、导入确认与 toast
 │   ├── bridge.ts              # Tauri invoke 与 listen 桥接层
 │   ├── time.ts                # 卡片头部的相对时间格式化
+│   ├── tagColors.ts           # 分类标签自定义颜色调色盘与持久化
 │   ├── assets.ts              # blob 文件名 → asset 协议 URL
 │   ├── styles.css             # Paste.app 样式令牌、暗色主题与核心样式
 │   ├── types.ts               # 剪贴板条目与前后端协议类型定义
-│   └── components/            # UI 组件
-│       ├── TitleBar.tsx       # 无边框标题栏与窗口控制
-│       ├── CardGrid.tsx       # 虚拟滚动卡片网格
+│   ├── components/            # UI 组件
+│   │   ├── TitleBar.tsx       # 无边框标题栏与窗口控制
+│   │   ├── TagFilterBar.tsx   # YouTube 风格分类标签横向滚动胶囊栏
+│   │   ├── CardGrid.tsx       # 虚拟滚动卡片网格
 │       ├── ClipCard.tsx       # 单张卡片组件
 │       ├── ContextMenu.tsx    # 右键菜单与分类标签
 │       ├── ConfirmDialog.tsx  # 导入前的确认对话框

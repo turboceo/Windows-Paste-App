@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipboardItem } from '../types'
+import { TAG_COLOR_PALETTE, getTagColor } from '../tagColors'
 
 export interface ContextMenuState {
   visible: boolean
@@ -11,11 +12,13 @@ export interface ContextMenuState {
 interface ContextMenuProps {
   menu: ContextMenuState
   allTags: string[]
+  tagColors?: Record<string, string>
   onClose: () => void
   onPaste: (item: ClipboardItem) => void
   onTogglePin: (item: ClipboardItem) => void
   onRemove: (item: ClipboardItem) => void
   onSetTag: (item: ClipboardItem, tag: string | null) => void
+  onSaveTagColor?: (tag: string, color: string) => void
 }
 
 
@@ -34,15 +37,19 @@ const SUBMENU_CLOSE_DELAY = 160
 export default function ContextMenu({
   menu,
   allTags,
+  tagColors,
   onClose,
   onPaste,
   onTogglePin,
   onRemove,
   onSetTag,
+  onSaveTagColor,
 }: ContextMenuProps) {
   const [showSubMenu, setShowSubMenu] = useState(false)
   const [isCreatingTag, setIsCreatingTag] = useState(false)
   const [newTagInput, setNewTagInput] = useState('')
+  const [selectedColor, setSelectedColor] = useState<string>(TAG_COLOR_PALETTE[0])
+  const [colorEditingTag, setColorEditingTag] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
   /** 收起子菜单的延时任务；鼠标回到主菜单项时要取消它 */
@@ -90,6 +97,8 @@ export default function ContextMenu({
     setShowSubMenu(false)
     setIsCreatingTag(false)
     setNewTagInput('')
+    setColorEditingTag(null)
+    setSelectedColor(TAG_COLOR_PALETTE[0])
   }, [menu.visible, menu.item?.id, cancelScheduledClose])
 
   // 只列数据库里真实存在的分类。
@@ -135,6 +144,9 @@ export default function ContextMenu({
     e.preventDefault()
     const trimmed = newTagInput.trim()
     if (trimmed && item) {
+      if (selectedColor && onSaveTagColor) {
+        onSaveTagColor(trimmed, selectedColor)
+      }
       onSetTag(item, trimmed)
       setIsCreatingTag(false)
       setNewTagInput('')
@@ -218,25 +230,63 @@ export default function ContextMenu({
 
             {mergedTags.map((tag) => {
               const isActive = item.tag === tag
+              const dotColor = getTagColor(tag, tagColors)
+              const isEditingThis = colorEditingTag === tag
               return (
-                <div
-                  key={tag}
-                  className={`menu-item tag-item${isActive ? ' active-tag' : ''}`}
-                  onClick={() => {
-                    onSetTag(item, tag)
-                    onClose()
-                  }}
-                >
-                  <span className="tag-dot" />
-                  <span className="item-label">{tag}</span>
-                  {isActive && <span className="check-glyph">&#xE73E;</span>}
+                <div key={tag} className="tag-item-container">
+                  <div
+                    className={`menu-item tag-item${isActive ? ' active-tag' : ''}`}
+                    onClick={() => {
+                      onSetTag(item, tag)
+                      onClose()
+                    }}
+                  >
+                    <span className="tag-dot" style={{ backgroundColor: dotColor }} />
+                    <span className="item-label">{tag}</span>
+                    {isActive && <span className="check-glyph">&#xE73E;</span>}
+                    <button
+                      type="button"
+                      className="tag-palette-trigger"
+                      title="修改此分类颜色"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        cancelScheduledClose()
+                        setColorEditingTag(isEditingThis ? null : tag)
+                      }}
+                    >
+                      &#xE790;
+                    </button>
+                  </div>
+
+                  {/* 展开的调色盘小栏 */}
+                  {isEditingThis && (
+                    <div
+                      className="tag-item-inline-palette"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {TAG_COLOR_PALETTE.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          className={`palette-color-btn${dotColor === c ? ' active' : ''}`}
+                          style={{ backgroundColor: c }}
+                          title={c}
+                          onClick={() => {
+                            if (onSaveTagColor) {
+                              onSaveTagColor(tag, c)
+                            }
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               )
             })}
 
             <div className="menu-divider" />
 
-            {/* 新建分类输入框 */}
+            {/* 新建分类输入框与调色盘 */}
             {!isCreatingTag ? (
               <div
                 className="menu-item new-tag"
@@ -252,18 +302,37 @@ export default function ContextMenu({
               </div>
             ) : (
               <form className="new-tag-form" onSubmit={handleCreateTagSubmit} onClick={(e) => e.stopPropagation()}>
-                <input
-                  ref={inputRef}
-                  className="new-tag-input"
-                  type="text"
-                  placeholder="标签名称..."
-                  value={newTagInput}
-                  onChange={(e) => setNewTagInput(e.target.value)}
-                  maxLength={12}
-                />
-                <button type="submit" className="new-tag-confirm" title="确认">
-                  &#xE73E;
-                </button>
+                <div className="new-tag-input-row">
+                  <span
+                    className="selected-color-preview"
+                    style={{ backgroundColor: selectedColor }}
+                    title="当前选择的颜色"
+                  />
+                  <input
+                    ref={inputRef}
+                    className="new-tag-input"
+                    type="text"
+                    placeholder="标签名称..."
+                    value={newTagInput}
+                    onChange={(e) => setNewTagInput(e.target.value)}
+                    maxLength={12}
+                  />
+                  <button type="submit" className="new-tag-confirm" title="确认">
+                    &#xE73E;
+                  </button>
+                </div>
+                <div className="color-palette-row">
+                  {TAG_COLOR_PALETTE.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      className={`palette-color-btn${selectedColor === color ? ' active' : ''}`}
+                      style={{ backgroundColor: color }}
+                      onClick={() => setSelectedColor(color)}
+                      title={color}
+                    />
+                  ))}
+                </div>
               </form>
             )}
           </div>
