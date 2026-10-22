@@ -3,18 +3,18 @@
   /* 亚克力已关闭（见 window_util.rs 的 ACRYLIC_ENABLED），面板不再靠 DWM
      模糊提供底色，所以这里用接近不透明的值，避免窗口透出桌面显得脏。
      重新打开亚克力时可以调回 0.94。 */
-  --panel-bg: rgba(253, 246, 235, 0.99);
-  --panel-border: rgba(120, 90, 50, 0.12);
-  --panel-shadow: 0 24px 60px -12px rgba(72, 48, 16, 0.22), 0 0 0 1px rgba(120, 90, 50, 0.08);
+  --panel-bg: rgba(248, 249, 251, 0.99);
+  --panel-border: rgba(0, 0, 0, 0.08);
+  --panel-shadow: 0 24px 60px -12px rgba(15, 23, 42, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.05);
 
-  /* 暖灰棕文字：冷灰压在这层米黄底上会显脏 */
-  --text-main: #33271a;
-  --text-muted: #8a7256;
-  --text-dim: #b09a80;
+  /* 高级自然中性灰文字：清晰干净，阅读舒适 */
+  --text-main: #1e293b;
+  --text-muted: #64748b;
+  --text-dim: #94a3b8;
 
-  /* 卡片本体是纯白，颜色全部集中在顶部色带里 */
+  /* 卡片本体纯白，与极淡的近白冷暖底板形成层次 */
   --card-surface: #ffffff;
-  --card-border: rgba(120, 90, 50, 0.1);
+  --card-border: rgba(0, 0, 0, 0.08);
 
   /* 按类型区分的头部色带（渐变让平涂色带有一点体积感） */
   --band-text: linear-gradient(135deg, #f7b955, #ee9727);
@@ -24,8 +24,8 @@
   --band-files: linear-gradient(135deg, #f0b53c, #db9a1c);
 
   /* Card shadow & Paste.app signature blue selection ring */
-  --card-shadow: 0 1px 2px rgba(120, 90, 50, 0.08), 0 8px 18px -8px rgba(120, 90, 50, 0.2);
-  --card-shadow-hover: 0 2px 4px rgba(120, 90, 50, 0.1), 0 14px 28px -10px rgba(120, 90, 50, 0.3);
+  --card-shadow: 0 1px 3px rgba(15, 23, 42, 0.05), 0 6px 16px -6px rgba(15, 23, 42, 0.08);
+  --card-shadow-hover: 0 2px 6px rgba(15, 23, 42, 0.07), 0 12px 24px -8px rgba(15, 23, 42, 0.14);
   --paste-selected-ring: 0 0 0 2px #007aff, 0 12px 26px rgba(0, 122, 255, 0.22);
 
   --pin-amber: #b45309;
@@ -162,8 +162,8 @@ body {
   display: flex;
   align-items: center;
   height: 38px;
-  background: rgba(255, 252, 246, 0.75);
-  border-bottom: 1px solid rgba(120, 90, 50, 0.08);
+  background: rgba(255, 255, 255, 0.7);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   user-select: none;
   flex: 0 0 38px;
   /* 不在这里做 backdrop-filter：它模糊的是已经半透明、且由 DWM 亚克力
@@ -195,15 +195,15 @@ body {
   border-radius: 999px;
   font-size: 11px;
   font-weight: 600;
-  background: rgba(120, 90, 50, 0.09);
-  color: #7a6146;
+  background: rgba(0, 0, 0, 0.05);
+  color: #64748b;
   letter-spacing: -0.2px;
   transition: all 160ms ease;
 }
 
 .count-badge.filtering {
-  background: rgba(234, 138, 31, 0.16);
-  color: #a35c07;
+  background: rgba(234, 138, 31, 0.14);
+  color: #ea8a1f;
 }
 
 .drag-region {
@@ -355,8 +355,8 @@ body {
 
 .drag-ghost .paste-card {
   box-shadow:
-    0 20px 44px rgba(72, 48, 16, 0.26),
-    0 8px 16px rgba(72, 48, 16, 0.14);
+    0 20px 44px rgba(15, 23, 42, 0.22),
+    0 8px 16px rgba(15, 23, 42, 0.12);
 }
 
 /* 落下时给一次轻微的吸附反馈 */
@@ -676,8 +676,8 @@ body.is-dragging-card .card-slot .paste-card {
   height: auto;
   min-height: 60px;
   border-radius: 10px;
-  border: 1px solid rgba(120, 90, 50, 0.14);
-  box-shadow: 0 2px 6px rgba(120, 90, 50, 0.1);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
 }
 
 .files-stage {
@@ -722,8 +722,8 @@ body.is-dragging-card .card-slot .paste-card {
   width: 100%;
   height: 100%;
   border-radius: 8px;
-  background: rgba(120, 90, 50, 0.04);
-  border: 1px solid rgba(120, 90, 50, 0.06);
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid rgba(0, 0, 0, 0.05);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -738,7 +738,7 @@ body.is-dragging-card .card-slot .paste-card {
 .cat-image .image-stage {
   border: 0;
   border-radius: 0;
-  background: rgba(120, 90, 50, 0.06);
+  background: rgba(0, 0, 0, 0.03);
 }
 
 /* 缩略图铺满卡片：object-fit: cover 才像"大图的小图"，
@@ -806,8 +806,8 @@ body.is-dragging-card .card-slot .paste-card {
   align-items: center;
   gap: 14px;
   padding: 12px 18px;
-  background: rgba(255, 252, 246, 0.7);
-  border-top: 1px solid rgba(120, 90, 50, 0.08);
+  background: rgba(255, 255, 255, 0.7);
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
   /* 同上：面板内部不需要再模糊一次 */
 }
 
@@ -818,9 +818,9 @@ body.is-dragging-card .card-slot .paste-card {
   display: flex;
   align-items: center;
   border-radius: 11px;
-  border: 1px solid rgba(120, 90, 50, 0.12);
-  background: rgba(255, 255, 255, 0.85);
-  box-shadow: 0 1px 3px rgba(120, 90, 50, 0.05), inset 0 1px 2px rgba(120, 90, 50, 0.03);
+  border: 1px solid rgba(0, 0, 0, 0.09);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03), inset 0 1px 2px rgba(0, 0, 0, 0.02);
   height: 38px;
   transition: all 180ms ease;
 }
@@ -828,7 +828,7 @@ body.is-dragging-card .card-slot .paste-card {
 .search:focus-within {
   border-color: #ea8a1f;
   background: #ffffff;
-  box-shadow: 0 0 0 3px rgba(234, 138, 31, 0.16), 0 2px 6px rgba(120, 90, 50, 0.06);
+  box-shadow: 0 0 0 3px rgba(234, 138, 31, 0.16), 0 2px 6px rgba(15, 23, 42, 0.04);
 }
 
 .search-glyph {
@@ -922,10 +922,10 @@ body.is-dragging-card .card-slot .paste-card {
 .nav-btn {
   width: 34px;
   height: 34px;
-  border: 1px solid rgba(120, 90, 50, 0.12);
+  border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.75);
-  box-shadow: 0 1px 2px rgba(120, 90, 50, 0.05);
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   color: var(--text-main);
   font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
   font-size: 13px;
@@ -938,8 +938,8 @@ body.is-dragging-card .card-slot .paste-card {
 
 .nav-btn:hover:not(:disabled) {
   background: #ffffff;
-  border-color: rgba(120, 90, 50, 0.24);
-  box-shadow: 0 3px 8px rgba(120, 90, 50, 0.1);
+  border-color: rgba(0, 0, 0, 0.16);
+  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.06);
   transform: translateY(-1px);
 }
 
@@ -963,8 +963,8 @@ body.is-dragging-card .card-slot .paste-card {
   position: relative;
   display: flex;
   align-items: center;
-  background: rgba(255, 252, 246, 0.45);
-  border-bottom: 1px solid rgba(120, 90, 50, 0.06);
+  background: rgba(255, 255, 255, 0.45);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
   flex: 0 0 auto;
   user-select: none;
   min-height: 44px;
@@ -1017,9 +1017,9 @@ body.is-dragging-card .card-slot .paste-card {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  border: 1px solid rgba(120, 90, 50, 0.16);
+  border: 1px solid rgba(0, 0, 0, 0.12);
   background: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 2px 6px rgba(72, 48, 16, 0.08);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1033,8 +1033,8 @@ body.is-dragging-card .card-slot .paste-card {
 .chip-nav-btn:hover {
   background: #ffffff;
   transform: scale(1.08);
-  border-color: rgba(120, 90, 50, 0.28);
-  box-shadow: 0 3px 8px rgba(72, 48, 16, 0.14);
+  border-color: rgba(0, 0, 0, 0.2);
+  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.12);
 }
 
 .chip-nav-btn:active {
@@ -1042,8 +1042,8 @@ body.is-dragging-card .card-slot .paste-card {
 }
 
 .tag-filter-pill {
-  border: 1px solid rgba(120, 90, 50, 0.12);
-  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.8);
   color: var(--text-muted);
   padding: 4px 12px 4px 10px;
   border-radius: 999px;
@@ -1072,8 +1072,8 @@ body.is-dragging-card .card-slot .paste-card {
 .tag-filter-pill:hover {
   background: #ffffff;
   color: var(--text-main);
-  border-color: rgba(120, 90, 50, 0.24);
-  box-shadow: 0 1px 3px rgba(120, 90, 50, 0.06);
+  border-color: rgba(0, 0, 0, 0.18);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
 }
 
 .tag-filter-pill.active {
@@ -1091,9 +1091,9 @@ body.is-dragging-card .card-slot .paste-card {
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
-  border: 1px solid rgba(120, 90, 50, 0.16);
+  border: 1px solid rgba(0, 0, 0, 0.1);
   border-radius: 10px;
-  box-shadow: 0 16px 36px rgba(72, 48, 16, 0.2), 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.14), 0 2px 8px rgba(0, 0, 0, 0.05);
   padding: 10px 12px;
   font-size: 12px;
   user-select: none;
@@ -1139,7 +1139,7 @@ body.is-dragging-card .card-slot .paste-card {
 
 .popover-divider {
   height: 1px;
-  background: rgba(120, 90, 50, 0.1);
+  background: rgba(0, 0, 0, 0.08);
   margin: 9px -12px 7px;
 }
 
@@ -1498,16 +1498,16 @@ body.is-dragging-card .card-slot .paste-card {
   gap: 8px;
   flex: 0 0 auto;
   padding: 7px 10px 7px 14px;
-  background: #fdf3e4;
-  border-bottom: 1px solid rgba(217, 119, 6, 0.2);
+  background: #fffbeb;
+  border-bottom: 1px solid rgba(245, 158, 11, 0.25);
   font-size: 12.5px;
-  color: #7a4d09;
+  color: #92400e;
 }
 
 .hotkey-warning-glyph {
   font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
   font-size: 13px;
-  color: #c2410c;
+  color: #d97706;
   flex: 0 0 auto;
 }
 
@@ -1523,7 +1523,7 @@ body.is-dragging-card .card-slot .paste-card {
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: #a16207;
+  color: #b45309;
   font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
   font-size: 10px;
   cursor: pointer;
@@ -1533,7 +1533,7 @@ body.is-dragging-card .card-slot .paste-card {
 }
 
 .hotkey-warning-close:hover {
-  background: rgba(217, 119, 6, 0.15);
+  background: rgba(245, 158, 11, 0.15);
 }
 
 /* ==========================================================================
@@ -1551,10 +1551,10 @@ body.is-dragging-card .card-slot .paste-card {
 .text-action {
   height: 34px;
   padding: 0 12px 0 10px;
-  border: 1px solid rgba(120, 90, 50, 0.12);
+  border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.75);
-  box-shadow: 0 1px 2px rgba(120, 90, 50, 0.05);
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   color: var(--text-muted);
   font-family: inherit;
   font-size: 12.5px;
@@ -1575,9 +1575,9 @@ body.is-dragging-card .card-slot .paste-card {
 
 .text-action:hover:not(:disabled) {
   background: #ffffff;
-  border-color: rgba(120, 90, 50, 0.24);
+  border-color: rgba(0, 0, 0, 0.16);
   color: var(--text-main);
-  box-shadow: 0 3px 8px rgba(120, 90, 50, 0.1);
+  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.06);
   transform: translateY(-1px);
 }
 
@@ -2023,8 +2023,8 @@ body.is-dragging-card .card-slot .paste-card {
   }
 
   .toast {
-    background: rgba(250, 243, 232, 0.95);
-    color: #33271a;
+    background: rgba(240, 245, 252, 0.95);
+    color: #0f172a;
   }
 
   .hotkey-warning {
