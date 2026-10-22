@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ClipboardItem } from '../types'
+import { relativeTime } from '../time'
 
 interface ClipCardProps {
   item: ClipboardItem
@@ -17,7 +18,11 @@ interface ClipCardProps {
   onContextMenu?: (item: ClipboardItem, event: React.MouseEvent) => void
 }
 
-/** One history card, styled after Paste.app. */
+/**
+ * One history card styled after Paste.app:
+ * 顶部是同色系的彩色色带（类型名 + 相对时间），下面是纯白正文，
+ * 底部一行居中的统计信息。
+ */
 export default function ClipCard({
   item,
   thumbnail,
@@ -126,7 +131,7 @@ export default function ClipCard({
         return item.content.trim()
       case 'image': {
         const match = item.content.match(/(\d+)\s*x\s*(\d+)/i)
-        return match ? `${match[1]}×${match[2]}` : '图片'
+        return match ? `${match[1]} × ${match[2]}` : '图片'
       }
       default: {
         const len = item.content.length
@@ -137,34 +142,37 @@ export default function ClipCard({
     }
   }, [semanticCategory, urlDomain, fileList.length, item.content])
 
-  return (
-    <div
-    className={`paste-card card cat-${semanticCategory}${selected ? ' selected' : ''}${
-      item.pinned ? ' pinned' : ''
-    }`}
-    onClick={() => onSelect(item)}
-    onDoubleClick={() => onPaste(item)}
-    onContextMenu={(e) => {
-      e.preventDefault()
-      onContextMenu?.(item, e)
-    }}
-  >
-      <div className="card-inner">
-        <header className="card-head">
-          <div className="pill-badge">
-            <span className="pill-glyph">{typeGlyph}</span>
-            <span className="pill-title">{typeName}</span>
-          </div>
+  const timeLabel = useMemo(() => relativeTime(item.createdAt), [item.createdAt])
 
-          <div className="head-meta">
-            {metaBadge && (
-              <span className="meta-label" title={metaBadge}>
-                {metaBadge}
+  return (
+    <div className={`card-shell cat-${semanticCategory}`}>
+      <div
+        className={`paste-card cat-${semanticCategory}${selected ? ' selected' : ''}${
+          item.pinned ? ' pinned' : ''
+        }`}
+        onClick={() => onSelect(item)}
+        onDoubleClick={() => onPaste(item)}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          onContextMenu?.(item, e)
+        }}
+      >
+        <header className="card-band">
+          <div className="band-main">
+            <span className="band-title">{typeName}</span>
+            {timeLabel && (
+              <span className="band-time" title={item.createdAtLabel}>
+                {timeLabel}
               </span>
             )}
+          </div>
 
+          <div className="band-actions">
+            <span className="band-glyph" aria-hidden="true">
+              {typeGlyph}
+            </span>
             <button
-              className={`pin-btn${item.pinned ? ' on' : ''}`}
+              className={`band-btn pin${item.pinned ? ' on' : ''}`}
               title={item.pinned ? '取消置顶 (Ctrl+P)' : '置顶 (Ctrl+P)'}
               aria-pressed={item.pinned}
               onClick={(event) => {
@@ -173,6 +181,16 @@ export default function ClipCard({
               }}
             >
               {item.pinned ? '\uE840' : '\uE718'}
+            </button>
+            <button
+              className="band-btn del"
+              title="删除 (Del)"
+              onClick={(event) => {
+                event.stopPropagation()
+                onRemove(item)
+              }}
+            >
+              &#xE74D;
             </button>
           </div>
         </header>
@@ -198,7 +216,6 @@ export default function ClipCard({
           ) : isColorCode ? (
             <div className="color-stage">
               <div className="color-swatch" style={{ backgroundColor: item.content.trim() }} />
-              <span className="color-hex">{item.content.trim()}</span>
             </div>
           ) : semanticCategory === 'files' ? (
             <div className="files-stage">
@@ -224,25 +241,13 @@ export default function ClipCard({
         </div>
 
         <footer className="card-foot">
-          <div className="foot-left">
-            <span className="timestamp">{item.createdAtLabel}</span>
-            {item.tag && (
-              <span className="card-tag-pill" title={`分类标签：${item.tag}`}>
-                <span className="tag-icon">&#xE8EC;</span>
-                {item.tag}
-              </span>
-            )}
-          </div>
-          <button
-            className="delete-btn"
-            title="删除 (Del)"
-            onClick={(event) => {
-              event.stopPropagation()
-              onRemove(item)
-            }}
-          >
-            &#xE74D;
-          </button>
+          {item.tag && (
+            <span className="card-tag-pill" title={`分类标签：${item.tag}`}>
+              <span className="tag-icon">&#xE8EC;</span>
+              {item.tag}
+            </span>
+          )}
+          {metaBadge && <span className="foot-meta">{metaBadge}</span>}
         </footer>
       </div>
     </div>

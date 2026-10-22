@@ -37,10 +37,15 @@ pub fn run() {
     // 命令行参数处理
     let args: Vec<String> = std::env::args().collect();
     let is_selftest = args.iter().any(|a| a == "--selftest");
+    // `--seed` 跑的是临时目录里的独立数据库，不会碰用户真实历史，
+    // 所以它也不该被单实例挡住——否则已经常驻的实例一唤回，
+    // 演示实例就直接退出了，看不到种子数据。
+    let is_seed = args.iter().any(|a| a == "--seed");
 
     // 单实例保护。避免两个副本同时占托盘、双份监听、双写同一个 SQLite。
-    // 自检不参与：它跑在临时目录、用独立数据库，被主实例挡住反而没法验证。
-    if !is_selftest {
+    // 自检与种子演示不参与：它们跑在临时目录、用独立数据库，
+    // 被主实例挡住反而没法验证。
+    if !is_selftest && !is_seed {
         match InstanceGuard::acquire() {
             Ok(Some(guard)) => {
                 // 必须持有到进程结束，否则第二个实例就能抢进来。

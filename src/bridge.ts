@@ -96,6 +96,8 @@ function seedDevData(handler: (message: HostPush) => void): void {
       preview: `[${String(index + 1).padStart(2, '0')}] ${text}`,
       hasImage: false,
       createdAtLabel: '2026-10-16 12:00',
+      // 相对时间要能分出层次，这里按序号往回退几小时
+      createdAt: new Date(Date.now() - (index + 1) * 37 * 60 * 1000).toISOString(),
       pinned: index === 2 || index === 15,
       tag: index === 2 ? '代码' : index === 5 ? '常用' : null,
       truncated: false,

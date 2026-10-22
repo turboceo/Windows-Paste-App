@@ -180,12 +180,24 @@ pub fn handle(app: &AppHandle, state: &mut AppState, req: HostRequest) {
             paste_item(app, state, item_id);
         }
         HostRequest::Delete { item_id } => {
+            // 删除前先记下它的槽位，以及它是不是当前选中项。
+            // reload() 找不到原选中 id 时会回退到第一项——那会让界面
+            // 从用户正看着的位置直接跳回顶部，所以下面要覆盖掉。
+            let removed_index = state.items.iter().position(|item| item.id == item_id);
+            let was_selected = state.selected_id == Some(item_id);
+
             // 删行的同时把图片文件一起删掉，否则 blobs/ 会无限增长
             if let Ok(Some(blob)) = state.db.delete(item_id) {
                 let _ = std::fs::remove_file(state.paths.blobs.join(&blob));
                 crate::state::forget_thumbnails(&[blob]);
             }
             state.reload();
+
+            // 只有删掉的是选中项时才纠正；删别的卡片不应改变当前选择。
+            if was_selected {
+                state.select_at_index_or_last(removed_index.unwrap_or(0));
+            }
+
             push_items(app, state);
             push_selection(app, state);
         }

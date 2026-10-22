@@ -99,6 +99,20 @@ impl AppState {
     pub fn item_by_id(&self, id: i64) -> Option<ClipboardItem> {
         self.items.iter().find(|i| i.id == id).cloned()
     }
+
+    /// 选中项被删除后，把选择停在原先的槽位。
+    ///
+    /// `reload()` 的兜底是"选中第一项"：这对搜索过滤是对的（旧下标在新结果里
+    /// 没有意义），但对删除不是。用户刚删掉第 8 张，视线还在那里，选中环却
+    /// 跳回第 1 张，列表也随之滚回顶部。删除路径在 `reload()` 之后调用这个
+    /// 函数覆盖兜底结果；槽位越界（删的是最后一项）时落到列表末尾。
+    pub fn select_at_index_or_last(&mut self, index: usize) {
+        self.selected_id = self
+            .items
+            .get(index)
+            .or_else(|| self.items.last())
+            .map(|item| item.id);
+    }
 }
 
 /// 卡片缩略图的目标边长（物理像素）。
@@ -194,6 +208,8 @@ pub struct ClipItemDto {
     pub content: String,
     pub preview: String,
     pub created_at_label: String,
+    /// RFC3339 原文。前端据此算「N 分钟前」，`created_at_label` 留给 tooltip。
+    pub created_at: String,
     pub pinned: bool,
     pub tag: Option<String>,
     /// 原文长度超过上限、落库时被截断过。
@@ -217,6 +233,7 @@ impl ClipItemDto {
             content: item.content.clone(),
             preview: item.preview(),
             created_at_label: item.created_at_label(),
+            created_at: item.created_at.to_rfc3339(),
             pinned: item.pinned,
             tag: item.tag.clone(),
             // 截断阈值是入库时的字符上限，到顶即认为被裁剪过
@@ -347,5 +364,47 @@ mod tests {
         };
         let dto = ClipItemDto::from_item(&item, &dir);
         assert!(!dto.has_image);
+    }
+
+    #[test]
+    fn test_selection_stays_at_deleted_slot() {
+        let root = std::env::temp_dir().join(format!("test_wp_sel_del_{}", std::process::id()));
+        let paths = AppPaths::at(root.clone());
+        let mut state = AppState::new(paths);
+
+        let item = |id: i64| ClipboardItem {
+            id,
+            item_type: ClipboardItemType::Text,
+            content: format!("item {id}"),
+            blob_path: None,
+            hash: format!("h{id}"),
+            created_at: Local::now(),
+            pinned: false,
+            tag: None,
+        };
+
+        // 中间项被删：原下标现在是下一张卡
+        state.items = vec![item(1), item(2), item(3)];
+        state.selected_id = Some(2);
+        state.items.remove(1);
+        state.select_at_index_or_last(1);
+        assert_eq!(state.selected_id, Some(3), "应停在原槽位，而不是第一项");
+
+        // 末尾项被删：下标越界，落到新的最后一项
+        state.items = vec![item(1), item(2), item(3)];
+        state.selected_id = Some(3);
+        state.items.remove(2);
+        state.select_at_index_or_last(2);
+        assert_eq!(state.selected_id, Some(2), "越界时应落到列表末尾");
+
+        // 唯一一项被删：空列表不选中任何东西
+        state.items = vec![item(1)];
+        state.selected_id = Some(1);
+        state.items.clear();
+        state.select_at_index_or_last(0);
+        assert_eq!(state.selected_id, None);
+
+        drop(state);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -19,6 +19,8 @@ export interface ClipboardItem {
   hasImage: boolean
   /** Preformatted timestamp for the card footer. */
   createdAtLabel: string
+  /** 同一时间的 RFC3339 原文，用于在卡片头部显示相对时间。 */
+  createdAt: string
   pinned: boolean
   /** Optional custom category tag (e.g. "代码", "工作", "常用"). */
   tag: string | null
