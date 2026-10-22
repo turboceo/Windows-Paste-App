@@ -9,9 +9,9 @@ use windows_sys::Win32::Graphics::Gdi::{
 };
 use windows_sys::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, SetFocus,
-    SetForegroundWindow, SetWindowPos, ShowWindow, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOMOVE,
-    SWP_NOSIZE, SWP_SHOWWINDOW, SW_RESTORE,
+    GetCursorPos, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, SetForegroundWindow,
+    SetWindowPos, ShowWindow, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_SHOWWINDOW, SW_RESTORE,
 };
 
 fn hwnd_of(window: &WebviewWindow) -> Option<HWND> {
@@ -184,8 +184,10 @@ pub fn force_foreground(window: &WebviewWindow) {
             SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
         );
 
+        // 只靠 SetForegroundWindow：它成功时会连带把焦点给窗口。
+        // 不再额外调 SetFocus —— 那个函数只能把焦点设给"与调用线程输入队列
+        // 关联"的窗口，从主线程调用本来就无效，加了只会误导。
         let _ = SetForegroundWindow(hwnd);
-        let _ = SetFocus(hwnd);
 
         if attached {
             AttachThreadInput(this_thread, target_thread, 0);

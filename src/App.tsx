@@ -575,6 +575,7 @@ export default function App() {
           open={pendingClear}
           title="清空全部历史记录？"
           confirmLabel="清空"
+          danger
           onCancel={() => setPendingClear(false)}
           onConfirm={onConfirmClearAll}
         >
@@ -591,6 +592,7 @@ export default function App() {
           open={pendingTagDelete !== null}
           title="删除这个分类？"
           confirmLabel="删除分类"
+          danger
           onCancel={() => setPendingTagDelete(null)}
           onConfirm={onConfirmTagDelete}
         >

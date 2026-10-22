@@ -110,7 +110,10 @@ pub fn run() {
 
     // 日志要尽早初始化：release 构建是 GUI 程序，没有控制台，
     // 所有 println! / eprintln! 都会被直接丢弃。没有日志就没有排查依据。
-    logging::init(&initial_paths);
+    //
+    // 路径固定为 %LOCALAPPDATA%\WindowsPaste\app.log，**不跟随数据目录**——
+    // 否则 --seed / --selftest 时日志会被写到临时夹里，排查时找不到。
+    logging::init();
 
     let initial_state = AppState::new(paths);
 
@@ -245,7 +248,11 @@ pub fn run() {
             tray::TrayIcon::start(tray::TrayActions {
                 on_show: move || {
                     let app = tray_show.clone();
-                    let _ = app.clone().run_on_main_thread(move || show_panel(&app));
+                    // 投递到主线程执行窗口操作。失败了要记下来——
+                    // 主线程忙或已退出时会静默返回 Err，用户看到的就是"点了没反应"。
+                    if let Err(err) = app.clone().run_on_main_thread(move || show_panel(&app)) {
+                        crate::logging::log(&format!("[托盘] 投递主线程失败：{err}"));
+                    }
                 },
                 on_exit: move || {
                     let app = tray_exit.clone();
@@ -302,31 +309,35 @@ pub fn show_panel(app: &tauri::AppHandle) {
         return;
     };
 
-    // 已经可见**且**在前台时才只把焦点要回来，不重复刷新、不重新居中——
-    // 否则每次双击图标面板都会"跳"一下。
-    // 可见但丢了焦点的情况要走完整流程：重新居中、重新 show、抢前台。
-    if window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false) {
-        let _ = window.set_focus();
-        return;
-    }
-
-    // Remember the foreground window so the paste lands in the right place.
+    // 这里**不做**"已经可见且在前台就直接返回"的短路。
+    //
+    // 原来有这么一段，本意是避免面板"跳"一下。但代价太大：面板长期可见时，
+    // 点托盘唤出会走这条短路，除了 set_focus 什么都不做——如果窗口在别的
+    // 显示器、或者被别的窗口盖着，用户就是看不到任何反应。
+    //
+    // "唤起"这个动作的语义应该是：无论当前什么状态，都把它摆到光标所在的
+    // 显示器正中央并抢到前台。重复居中的视觉跳动远好于"点了没反应"。
     let foreground = paste::PasteService::get_foreground_window();
 
     // 主线程上只做窗口操作，**不等任何状态**。
     //
     // 以前这里要拿锁做 reload + 全表序列化，而那段代码跑在主线程上，
-    // 一旦别的线程正持着锁，窗口就会迟迟显示不出来——用户看到的就是
-    // "按了热键没反应"。现在数据刷新改成投递一条命令，主线程立刻返回。
-    window_util::center_on_cursor(&window);
+    // 一旦别的线程正持着锁，窗口就会迟迟显示不出来。现在数据刷新
+    // 改成投递一条命令，主线程立刻返回。
+    //
+    // 顺序：先 show + 还原 → 再定位 → 最后抢前台。
+    // 最小化状态下 set_position 不生效，必须先还原。
     let _ = window.show();
+    let _ = window.unminimize();
+
+    window_util::center_on_cursor(&window);
+
     // 把窗口提到 Z 序最前并强制抢焦点。
     //
     // 单靠 `set_focus()` 不够：Windows 有前台锁（foreground lock），
     // 一个后台进程不能随便把窗口切到前台，`SetForegroundWindow` 会返回
     // false 而什么都不发生。这正是"托盘点了没反应、但窗口其实还在"的成因。
     window_util::force_foreground(&window);
-    let _ = window.set_focus();
 
     // 记下呼出前的目标窗口 + 清空筛选 + 刷新列表，一并交给 owner 线程
     if let Some(state) = app.try_state::<worker::StateHandle>() {
@@ -334,6 +345,15 @@ pub fn show_panel(app: &tauri::AppHandle) {
             target_hwnd: foreground as isize,
         });
     }
+
+    // 记录唤起结果：这是"唤不起来"能否被诊断的关键。
+    // 如果 visible=false 或 focused=false，说明前台锁或窗口状态有问题。
+    logging::log(&format!(
+        "[唤起] visible={} focused={} minimized={}",
+        window.is_visible().unwrap_or(false),
+        window.is_focused().unwrap_or(false),
+        window.is_minimized().unwrap_or(false),
+    ));
 }
 
 /// 按文件名批量删除 blob，尽力而为（文件已被删掉也无所谓）。

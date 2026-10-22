@@ -19,9 +19,19 @@ static LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
 /// 串行化写入，避免多线程交错出半行
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
-/// 初始化日志路径。在应用启动最早处调用一次。
-pub fn init(paths: &crate::db::AppPaths) {
-    let path = paths.root.join("app.log");
+/// 初始化日志。
+///
+/// 路径**固定**在 `%LOCALAPPDATA%\WindowsPaste\app.log`，不跟随数据目录。
+/// 这一点很重要：`--seed` / `--selftest` 会把数据目录指到临时文件夹，
+/// 如果日志也跟着走，排查时就永远找不到它。
+pub fn init() {
+    let root = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Users\Default\AppData\Local"))
+        .join("WindowsPaste");
+    let _ = fs::create_dir_all(&root);
+
+    let path = root.join("app.log");
     let _ = LOG_PATH.set(path.clone());
 
     // 启动时若文件过大就先清空，避免无限增长
@@ -36,6 +46,9 @@ pub fn init(paths: &crate::db::AppPaths) {
         env!("CARGO_PKG_VERSION"),
         std::process::id()
     ));
+
+    // 写不进去时至少让用户能在控制台看到（如果有的话）
+    log(&format!("[日志] 写入 {}", path.display()));
 }
 
 /// 写一行日志。未初始化时静默丢弃（例如单元测试环境）。

@@ -36,8 +36,20 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(paths: AppPaths) -> Self {
-        let db = Database::open_with_blobs(&paths.db, HISTORY_CAPACITY, paths.blobs.clone())
-            .expect("open sqlite database");
+        // 打不开数据库时把原因写进日志再退出。
+        // 直接 expect 的话，release 构建里进程会静默消失，
+        // 日志里只有"启动"一行，看不出发生了什么。
+        let db = match Database::open_with_blobs(&paths.db, HISTORY_CAPACITY, paths.blobs.clone()) {
+            Ok(db) => db,
+            Err(err) => {
+                crate::logging::log(&format!(
+                    "[致命] 无法打开数据库 {}：{}",
+                    paths.db.display(),
+                    err
+                ));
+                panic!("open sqlite database: {err}");
+            }
+        };
         let total_count = db.get_total_count().unwrap_or(0);
         let all_tags = db.get_all_tags().unwrap_or_default();
         let tag_counts = db.get_tag_counts().unwrap_or_default();

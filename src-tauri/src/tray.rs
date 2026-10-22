@@ -294,10 +294,15 @@ unsafe extern "system" fn tray_wnd_proc(
 
                 match cmd {
                     ID_TRAY_SHOW => {
+                        crate::logging::log("[托盘] 点击唤起");
                         if let Ok(lock) = TRAY_SHOW.lock() {
                             if let Some(ref cb) = *lock {
                                 cb();
+                            } else {
+                                crate::logging::log("[托盘] 唤起回调为空");
                             }
+                        } else {
+                            crate::logging::log("[托盘] 唤起回调锁失败");
                         }
                     }
                     ID_TRAY_EXIT => {

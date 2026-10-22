@@ -1291,10 +1291,33 @@ body {
   border-color: #1d4ed8;
 }
 
+/* 破坏性操作的主按钮：删除 / 清空。
+   红色沿用工具栏 danger 那套色值（#dc2626 / #b91c1c），保持全站一致。 */
+.dialog-btn.primary.danger {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #ffffff;
+}
+
+.dialog-btn.primary.danger:hover {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}
+
+.dialog-btn.primary.danger:active {
+  background: #991b1b;
+  border-color: #991b1b;
+}
+
 .dialog-btn:focus-visible,
 .icon-action:focus-visible {
   outline: 2px solid #2563eb;
   outline-offset: 2px;
+}
+
+/* 危险按钮的焦点环跟着变红，否则蓝环配红底很扎眼 */
+.dialog-btn.primary.danger:focus-visible {
+  outline-color: #dc2626;
 }
 
 /* ==========================================================================
@@ -1539,6 +1562,18 @@ body {
     background: #2b6cb0;
     border-color: #2b6cb0;
     color: #ffffff;
+  }
+
+  /* 暗色下红色要压一点亮度，否则在深底上过于刺目 */
+  .dialog-btn.primary.danger {
+    background: #b91c1c;
+    border-color: #b91c1c;
+    color: #ffffff;
+  }
+
+  .dialog-btn.primary.danger:hover {
+    background: #991b1b;
+    border-color: #991b1b;
   }
 
   .image-stage {
