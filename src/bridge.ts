@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type { HostPush, HostRequest } from './types'
 
 /**
- * Sole channel between the React UI and the Tauri backend.
+ * Sole channel between the UI and the Tauri backend.
  *
  * `send` forwards a request to the Rust `dispatch` command; `onPush` subscribes
  * to the single `host-push` event stream the backend emits. Components never

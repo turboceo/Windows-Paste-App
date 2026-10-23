@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import type { ClipboardItem } from '../types'
 import { relativeTime } from '../time'
 import { hasOcrText } from '../ocr'
@@ -9,95 +9,72 @@ interface ClipCardProps {
    * 缩略图 data URL。`undefined` = 还没拉过，`null` = 拉过但取不到。
    * 两者在视觉上都是占位，但前者会触发一次拉取。
    */
-  thumbnail: string | null | undefined
+  thumbnail: () => string | null | undefined
   onRequestThumbnail: (itemId: number) => void
-  selected: boolean
-  tagColor?: string
+  selected: () => boolean
+  tagColor?: () => string | undefined
   onSelect: (item: ClipboardItem) => void
   onDoubleClick?: (item: ClipboardItem) => void
   onPaste: (item: ClipboardItem) => void
   onTogglePin: (item: ClipboardItem) => void
   onRemove: (item: ClipboardItem) => void
-  onContextMenu?: (item: ClipboardItem, event: React.MouseEvent) => void
+  onContextMenu?: (item: ClipboardItem, event: MouseEvent) => void
 }
 
 /**
- * One history card styled after Paste.app:
+ * One history card styled after Paste.app.
+ *
  * 顶部是同色系的彩色色带（类型名 + 相对时间），下面是纯白正文，
  * 底部一行居中的统计信息。
+ *
+ * Solid 版本用 `createMemo` 承接原来 `useMemo` 的职责：分类判定、
+ * 类型图标、角标文案都由 item 派生，并保证同一份 item 只算一次。
  */
-export default function ClipCard({
-  item,
-  thumbnail,
-  onRequestThumbnail,
-  selected,
-  tagColor,
-  onSelect,
-  onDoubleClick,
-  onPaste,
-  onTogglePin,
-  onRemove,
-  onContextMenu,
-}: ClipCardProps) {
-  const isUrl = useMemo(() => {
-    if (item.type !== 'Text') return false
-    return /^https?:\/\/[^\s]+$/i.test(item.content.trim())
-  }, [item.type, item.content])
+export default function ClipCard(props: ClipCardProps) {
+  const item = () => props.item
 
-  const urlDomain = useMemo(() => {
-    if (!isUrl) return ''
+  const isUrl = createMemo(() => {
+    if (item().type !== 'Text') return false
+    return /^https?:\/\/[^\s]+$/i.test(item().content.trim())
+  })
+
+  const urlDomain = createMemo(() => {
+    if (!isUrl()) return ''
     try {
-      return new URL(item.content.trim()).hostname.replace(/^www\./, '')
+      return new URL(item().content.trim()).hostname.replace(/^www\./, '')
     } catch {
       return ''
     }
-  }, [isUrl, item.content])
+  })
 
-  const isColorCode = useMemo(() => {
-    if (item.type !== 'Text') return false
-    const trimmed = item.content.trim()
+  const isColorCode = createMemo(() => {
+    if (item().type !== 'Text') return false
+    const trimmed = item().content.trim()
     return (
       /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(trimmed) ||
       /^rgba?\((\s*\d+\s*,?){3,4}\)$/i.test(trimmed)
     )
-  }, [item.type, item.content])
+  })
 
-  const fileList = useMemo(() => {
-    if (item.type !== 'Files') return []
-    return item.content
-      .split(/\r?\n/)
+  const fileList = createMemo(() => {
+    if (item().type !== 'Files') return []
+    return item()
+      .content.split(/\r?\n/)
       .map((p) => p.trim())
       .filter(Boolean)
       .map((fullPath) => ({ name: fullPath.split(/[\\/]/).pop() || fullPath, fullPath }))
-  }, [item.type, item.content])
+  })
 
-  // 缩略图按需拉取：卡片被挂载（即滚动到可见区域）时才请求
-  useEffect(() => {
-    if (item.hasImage && thumbnail === undefined) {
-      onRequestThumbnail(item.id)
-    }
-  }, [item.hasImage, item.id, thumbnail, onRequestThumbnail])
-
-  const imageSrc = item.type === 'Image' ? thumbnail ?? null : null
-
-  // 加载失败后不要一直重试：记住这张卡已经失败过，直接显示占位
-  const [imageFailed, setImageFailed] = useState(false)
-
-  // 缩略图换了（重新推送过）就重置失败状态
-  useEffect(() => {
-    setImageFailed(false)
-  }, [imageSrc])
-
-  const semanticCategory = useMemo(() => {
-    if (item.type === 'Image') return 'image'
-    if (item.type === 'Files') return 'files'
-    if (isUrl) return 'link'
-    if (isColorCode) return 'color'
+  const semanticCategory = createMemo(() => {
+    if (item().type === 'Image') return 'image'
+    if (item().type === 'Files') return 'files'
+    if (isUrl()) return 'link'
+    if (isColorCode()) return 'color'
     return 'text'
-  }, [item.type, isUrl, isColorCode])
+  })
 
-  const typeGlyph = useMemo(() => {
-    switch (semanticCategory) {
+  const typeGlyph = createMemo(() => {
+    switch (semanticCategory()) {
       case 'image':
         return '\uEB9F'
       case 'files':
@@ -109,10 +86,10 @@ export default function ClipCard({
       default:
         return '\uE8A5'
     }
-  }, [semanticCategory])
+  })
 
-  const typeName = useMemo(() => {
-    switch (semanticCategory) {
+  const typeName = createMemo(() => {
+    switch (semanticCategory()) {
       case 'image':
         return '图像'
       case 'files':
@@ -124,78 +101,114 @@ export default function ClipCard({
       default:
         return '文本'
     }
-  }, [semanticCategory])
+  })
 
-  const metaBadge = useMemo(() => {
-    switch (semanticCategory) {
+  const metaBadge = createMemo(() => {
+    switch (semanticCategory()) {
       case 'link':
-        return urlDomain || '网页'
+        return urlDomain() || '网页'
       case 'files':
-        return `${fileList.length} 个文件`
+        return `${fileList().length} 个文件`
       case 'color':
-        return item.content.trim()
+        return item().content.trim()
       case 'image': {
-        const match = item.content.match(/(\d+)\s*x\s*(\d+)/i)
+        const match = item().content.match(/(\d+)\s*x\s*(\d+)/i)
         const sizeStr = match ? `${match[1]} × ${match[2]}` : '图片'
-        return hasOcrText(item.content, item.type) ? `${sizeStr} · 含文字` : sizeStr
+        return hasOcrText(item().content, item().type) ? `${sizeStr} · 含文字` : sizeStr
       }
       default: {
-        const len = item.content.length
+        const len = item().content.length
         if (len === 0) return ''
         // 被截断过的内容加个后缀，避免用户以为复制的东西只有这么点
-        return item.truncated ? `${len}+ 字符` : `${len} 字符`
+        return item().truncated ? `${len}+ 字符` : `${len} 字符`
       }
     }
-  }, [semanticCategory, urlDomain, fileList.length, item.content])
+  })
 
-  const timeLabel = useMemo(() => relativeTime(item.createdAt), [item.createdAt])
+  const timeLabel = createMemo(() => relativeTime(item().createdAt))
+
+  /** 加载失败的缩略图不再重试，直接显示占位 */
+  const [imageFailed, setImageFailed] = createSignal(false)
+
+  const imageSrc = () => (item().type === 'Image' ? props.thumbnail() ?? null : null)
+
+  // 缩略图换了（重新推送过）就重置失败状态
+  createEffect(
+    () => imageSrc(),
+    () => {
+      setImageFailed(false)
+    },
+  )
+
+  /** 缩略图按需拉取：卡片被挂载（即滚动到可见区域）时才请求 */
+  createEffect(
+    () => [item().hasImage, props.thumbnail()] as const,
+    ([hasImage, thumb]) => {
+      if (hasImage && thumb === undefined) {
+        props.onRequestThumbnail(item().id)
+      }
+    },
+  )
+
+  const tagStyle = () => {
+    const color = props.tagColor?.()
+    if (!color) return undefined
+    return {
+      'background-color': `${color}18`,
+      color,
+      'border-color': `${color}38`,
+    }
+  }
 
   return (
-    <div
-      className={`card-shell cat-${semanticCategory}${selected ? ' selected' : ''}`}
-    >
+    <div class={["card-shell", `cat-${semanticCategory()}`, { selected: props.selected() }]}>
       <div
-        className={`paste-card cat-${semanticCategory}${selected ? ' selected' : ''}${
-          item.pinned ? ' pinned' : ''
-        }`}
-        onClick={() => onSelect(item)}
-        onDoubleClick={() => (onDoubleClick ? onDoubleClick(item) : onPaste(item))}
-        onContextMenu={(e) => {
-          e.preventDefault()
-          onContextMenu?.(item, e)
+        class={[
+          "paste-card",
+          `cat-${semanticCategory()}`,
+          { selected: props.selected(), pinned: item().pinned },
+        ]}
+        onClick={() => props.onSelect(item())}
+        onDblClick={() => {
+          if (props.onDoubleClick) props.onDoubleClick(item())
+          else props.onPaste(item())
+        }}
+        onContextMenu={(event) => {
+          event.preventDefault()
+          props.onContextMenu?.(item(), event)
         }}
       >
-        <header className="card-band">
-          <div className="band-main">
-            <span className="band-title">{typeName}</span>
-            {timeLabel && (
-              <span className="band-time" title={item.createdAtLabel}>
-                {timeLabel}
+        <header class="card-band">
+          <div class="band-main">
+            <span class="band-title">{typeName()}</span>
+            <Show when={timeLabel()}>
+              <span class="band-time" title={item().createdAtLabel}>
+                {timeLabel()}
               </span>
-            )}
+            </Show>
           </div>
 
-          <div className="band-actions">
-            <span className="band-glyph" aria-hidden="true">
-              {typeGlyph}
+          <div class="band-actions">
+            <span class="band-glyph" aria-hidden="true">
+              {typeGlyph()}
             </span>
             <button
-              className={`band-btn pin${item.pinned ? ' on' : ''}`}
-              title={item.pinned ? '取消置顶 (Ctrl+P)' : '置顶 (Ctrl+P)'}
-              aria-pressed={item.pinned}
+              class={["band-btn", "pin", { on: item().pinned }]}
+              title={item().pinned ? '取消置顶 (Ctrl+P)' : '置顶 (Ctrl+P)'}
+              aria-pressed={item().pinned ? 'true' : 'false'}
               onClick={(event) => {
                 event.stopPropagation()
-                onTogglePin(item)
+                props.onTogglePin(item())
               }}
             >
-              {item.pinned ? '\uE840' : '\uE718'}
+              {item().pinned ? '\uE840' : '\uE718'}
             </button>
             <button
-              className="band-btn del"
+              class="band-btn del"
               title="删除 (Del)"
               onClick={(event) => {
                 event.stopPropagation()
-                onRemove(item)
+                props.onRemove(item())
               }}
             >
               &#xE74D;
@@ -203,71 +216,83 @@ export default function ClipCard({
           </div>
         </header>
 
-        <div className="card-body">
-          {item.type === 'Image' ? (
-            <div className="image-stage">
-              {imageSrc && !imageFailed ? (
+        <div class="card-body">
+          <Show when={item().type === 'Image'}>
+            <div class="image-stage">
+              <Show
+                when={imageSrc() && !imageFailed()}
+                fallback={<span class="image-fallback">{item().preview || '图像'}</span>}
+              >
                 <img
-                  src={imageSrc}
+                  src={imageSrc() ?? ''}
                   alt=""
-                  className="hero-image"
+                  class="hero-image"
                   loading="lazy"
                   decoding="async"
                   // asset 协议被 scope 拒绝、或 blob 文件已被删掉时，
                   // <img> 只会静默显示为空白。这里兜底成占位，至少能看出"这是一张图"。
                   onError={() => setImageFailed(true)}
                 />
-              ) : (
-                <span className="image-fallback">{item.preview || '图像'}</span>
-              )}
+              </Show>
             </div>
-          ) : isColorCode ? (
-            <div className="color-stage">
-              <div className="color-swatch" style={{ backgroundColor: item.content.trim() }} />
+          </Show>
+
+          <Show when={item().type !== 'Image' && isColorCode()}>
+            <div class="color-stage">
+              <div class="color-swatch" style={{ 'background-color': item().content.trim() }} />
             </div>
-          ) : semanticCategory === 'files' ? (
-            <div className="files-stage">
-              {fileList.slice(0, 4).map((file, idx) => (
-                <div key={idx} className="file-row">
-                  <span className="file-icon">&#xE8A5;</span>
-                  <span className="file-name" title={file.fullPath}>
-                    {file.name}
-                  </span>
-                </div>
-              ))}
-              {fileList.length > 4 && (
-                <span className="files-more">还有 {fileList.length - 4} 个文件...</span>
-              )}
+          </Show>
+
+          <Show when={item().type !== 'Image' && !isColorCode() && semanticCategory() === 'files'}>
+            <div class="files-stage">
+              <For each={fileList().slice(0, 4)}>
+                {(file) => (
+                  <div class="file-row">
+                    <span class="file-icon">&#xE8A5;</span>
+                    <span class="file-name" title={file.fullPath}>
+                      {file.name}
+                    </span>
+                  </div>
+                )}
+              </For>
+              <Show when={fileList().length > 4}>
+                <span class="files-more">还有 {fileList().length - 4} 个文件...</span>
+              </Show>
             </div>
-          ) : isUrl ? (
-            <div className="link-stage">
-              <span className="link-preview">{item.content.trim()}</span>
+          </Show>
+
+          <Show
+            when={
+              item().type !== 'Image' && !isColorCode() && semanticCategory() !== 'files' && isUrl()
+            }
+          >
+            <div class="link-stage">
+              <span class="link-preview">{item().content.trim()}</span>
             </div>
-          ) : (
-            <p className="text-preview">{item.preview}</p>
-          )}
+          </Show>
+
+          <Show
+            when={
+              item().type !== 'Image' &&
+              !isColorCode() &&
+              semanticCategory() !== 'files' &&
+              !isUrl()
+            }
+          >
+            <p class="text-preview">{item().preview}</p>
+          </Show>
         </div>
 
-        <footer className="card-foot">
-          {item.tag && (
-            <span
-              className="card-tag-pill"
-              title={`分类标签：${item.tag}`}
-              style={
-                tagColor
-                  ? {
-                      backgroundColor: `${tagColor}18`,
-                      color: tagColor,
-                      borderColor: `${tagColor}38`,
-                    }
-                  : undefined
-              }
-            >
-              <span className="tag-icon">&#xE8EC;</span>
-              {item.tag}
+        <footer class="card-foot">
+          <Show when={item().tag}>
+            <span class="card-tag-pill" title={`分类标签：${item().tag}`} style={tagStyle()}>
+              <span class="tag-icon">&#xE8EC;</span>
+              {item().tag}
             </span>
-          )}
-          {metaBadge && <span className="foot-meta">{metaBadge}</span>}
+          </Show>
+          <Show when={metaBadge()}>
+            <span class="foot-meta">{metaBadge()}</span>
+          </Show>
         </footer>
       </div>
     </div>

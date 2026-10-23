@@ -12,16 +12,14 @@
     "test:selftest": "cargo run --manifest-path src-tauri/Cargo.toml -- --selftest"
   },
   "dependencies": {
+    "@solidjs/web": "^2.0.0-rc.18",
     "@tauri-apps/api": "^2.0.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "solid-js": "^2.0.0-rc.18"
   },
   "devDependencies": {
+    "@solidjs/vite-plugin": "^3.0.0-next.51",
     "@tauri-apps/cli": "^2.12.3",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.7.3",
-    "vite": "^6.0.11"
+    "vite": "^8.3.5"
   }
 }

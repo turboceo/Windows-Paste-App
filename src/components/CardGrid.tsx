@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from 'solid-js'
 import ClipCard from './ClipCard'
+import { mount } from '../solid-utils'
 import { send } from '../bridge'
 import type { ClipboardItem } from '../types'
 
@@ -17,7 +18,7 @@ const PADDING_BOTTOM = 20
 const PADDING_LEFT = 20
 const PADDING_RIGHT = 20
 const PADDING_HORIZONTAL = PADDING_LEFT + PADDING_RIGHT
-const OVERSCAN_ROWS = 2 // Render buffer rows above and below the visible area
+const OVERSCAN_ROWS = 2
 
 /** 按下后移动超过这个距离才认定为拖拽，否则仍然是一次普通点击。 */
 const DRAG_THRESHOLD = 6
@@ -48,214 +49,186 @@ interface DragSession {
   height: number
 }
 
-/** 浮层渲染只需要这几个值；指针位置走命令式更新，避免每帧重渲染整个网格。 */
-interface DragView {
-  id: number
-  width: number
-  height: number
-}
-
 interface CardGridProps {
-  items: ClipboardItem[]
+  items: () => ClipboardItem[]
   /** 已拉取的缩略图，key 是条目 id */
-  thumbnails: Record<number, string | null>
+  thumbnails: () => Record<number, string | null>
   onRequestThumbnail: (itemId: number) => void
-  selectedId: number | null
-  tagColors?: Record<string, string>
+  selectedId: () => number | null
+  tagColors: () => Record<string, string>
   onSelect: (item: ClipboardItem) => void
   onDoubleClick?: (item: ClipboardItem) => void
   onPaste: (item: ClipboardItem) => void
   onTogglePin: (item: ClipboardItem) => void
   onRemove: (item: ClipboardItem) => void
-  onContextMenu?: (item: ClipboardItem, event: React.MouseEvent) => void
+  onContextMenu?: (item: ClipboardItem, event: MouseEvent) => void
 }
 
 /**
- * Virtualised, four-ish column grid of clipboard cards.
+ * 虚拟滚动 + 拖拽排序的卡片网格。
  *
- * 卡片不再交给 CSS Grid 自动排版，而是按 index 计算绝对坐标：
+ * 卡片按 index 计算绝对坐标（而不是交给 CSS Grid 排版）：
  * 这样拖拽改变顺序时，每张卡片的 `transform` 会自己过渡到新位置，
  * 不需要手写 FLIP 测量，也不会因为虚拟列表的挂载/卸载而丢动画。
+ *
+ * Solid 版本的关键差异：组件函数只执行一次，因此所有"跨帧保持"的
+ * 可变状态都是普通局部变量（相当于 React 的 useRef），
+ * 只有真正需要触发渲染的才用 signal。
  */
-export default function CardGrid({
-  items,
-  thumbnails,
-  onRequestThumbnail,
-  selectedId,
-  tagColors,
-  onSelect,
-  onDoubleClick,
-  onPaste,
-  onTogglePin,
-  onRemove,
-  onContextMenu,
-}: CardGridProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null)
-  const [containerWidth, setContainerWidth] = useState(0)
-  const [containerHeight, setContainerHeight] = useState(0)
-  const [scrollTop, setScrollTop] = useState(0)
-  const [columns, setColumns] = useState(1)
+export default function CardGrid(props: CardGridProps) {
+  let containerEl: HTMLDivElement | undefined
+  let ghostEl: HTMLDivElement | undefined
+
+  const [containerWidth, setContainerWidth] = createSignal(0)
+  const [containerHeight, setContainerHeight] = createSignal(0)
+  const [scrollTop, setScrollTop] = createSignal(0)
+  const [columns, setColumns] = createSignal(1)
 
   /** 拖拽中的乐观顺序；null 表示直接跟随宿主推送。 */
-  const [dragItems, setDragItems] = useState<ClipboardItem[] | null>(null)
-  const [dragView, setDragView] = useState<DragView | null>(null)
-  const [justDroppedId, setJustDroppedId] = useState<number | null>(null)
+  const [dragItems, setDragItems] = createSignal<ClipboardItem[] | null>(null)
+  const [dragView, setDragView] = createSignal<{ id: number; width: number; height: number } | null>(
+    null,
+  )
+  const [justDroppedId, setJustDroppedId] = createSignal<number | null>(null)
 
-  const pendingRef = useRef<PendingDrag | null>(null)
-  const dragRef = useRef<DragSession | null>(null)
-  const dragItemsRef = useRef<ClipboardItem[] | null>(null)
-  const ghostRef = useRef<HTMLDivElement | null>(null)
-  const itemsRef = useRef(items)
-  itemsRef.current = items
+  // ---- 非响应式的会话状态 ----
+  let pending: PendingDrag | null = null
+  let session: DragSession | null = null
+  let dragList: ClipboardItem[] | null = null
+  let suppressClick = false
+  let syncTimer: number | null = null
+  let rafHandle: number | null = null
+  let scrollRaf: number | null = null
 
-  /** 拖拽结束后的那次 click 不应该顺带改变选中项。 */
-  const suppressClickRef = useRef(false)
-  const syncTimerRef = useRef<number | null>(null)
+  const itemsNow = () => props.items()
 
-  const rafRef = useRef<number | null>(null)
+  const measure = () => {
+    if (!containerEl) return
+    setContainerWidth(containerEl.clientWidth)
+    setContainerHeight(containerEl.clientHeight)
+    setScrollTop(containerEl.scrollTop)
+  }
 
-  const measure = useCallback(() => {
-    const el = containerRef.current
-    if (!el) return
-    setContainerWidth(el.clientWidth)
-    setContainerHeight(el.clientHeight)
-    setScrollTop(el.scrollTop)
-  }, [])
-
-  const recomputeColumns = useCallback(() => {
-    const el = containerRef.current
-    if (!el) return
-    const usable = el.clientWidth - PADDING_HORIZONTAL
+  const recomputeColumns = () => {
+    if (!containerEl) return
+    const usable = containerEl.clientWidth - PADDING_HORIZONTAL
     if (usable <= 0) return
     const next = Math.max(1, Math.floor((usable + GRID_GAP) / (TARGET_CARD_WIDTH + GRID_GAP)))
     setColumns((prev) => {
-      if (prev !== next) {
-        send({ type: 'columns', columns: next })
-      }
+      if (prev !== next) send({ type: 'columns', columns: next })
       return next
     })
-  }, [])
+  }
 
-  useLayoutEffect(() => {
+  mount(() => {
     measure()
     recomputeColumns()
-
-    const el = containerRef.current
-    if (!el) return
-
+    if (!containerEl) return
     const observer = new ResizeObserver(() => {
       measure()
       recomputeColumns()
     })
-    observer.observe(el)
-
+    observer.observe(containerEl)
     return () => observer.disconnect()
-  }, [measure, recomputeColumns])
+  })
 
-  const onScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
-    const target = event.currentTarget
-    if (rafRef.current !== null) return
-    rafRef.current = requestAnimationFrame(() => {
-      setScrollTop(target.scrollTop)
-      rafRef.current = null
-    })
-  }, [])
+  onCleanup(() => {
+    if (rafHandle !== null) cancelAnimationFrame(rafHandle)
+    if (scrollRaf !== null) cancelAnimationFrame(scrollRaf)
+    if (syncTimer !== null) window.clearTimeout(syncTimer)
+    document.body.classList.remove('is-dragging-card')
+  })
 
-  useEffect(() => {
-    return () => {
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current)
-      }
-      if (syncTimerRef.current !== null) {
-        window.clearTimeout(syncTimerRef.current)
-      }
-      document.body.classList.remove('is-dragging-card')
-    }
-  }, [])
+  // ---- 几何计算 ----
+  const activeItems = () => dragItems() ?? itemsNow()
 
-  const activeItems = dragItems ?? items
-  const usable = containerWidth - PADDING_HORIZONTAL
-  const cardWidth = usable > 0 && columns > 0
-    ? Math.max(100, (usable - (columns - 1) * GRID_GAP) / columns)
-    : TARGET_CARD_WIDTH
-  const cardHeight = Math.round(cardWidth * CARD_ASPECT)
-  const rowStep = cardHeight + GRID_GAP
+  const geometry = createMemo(() => {
+    const usable = containerWidth() - PADDING_HORIZONTAL
+    const cols = columns()
+    const cardWidth =
+      usable > 0 && cols > 0
+        ? Math.max(100, (usable - (cols - 1) * GRID_GAP) / cols)
+        : TARGET_CARD_WIDTH
+    const cardHeight = Math.round(cardWidth * CARD_ASPECT)
+    const rowStep = cardHeight + GRID_GAP
+    return { cols, cardWidth, cardHeight, rowStep }
+  })
 
-  /** 指针事件回调里要用最新的布局参数，又不该因此重建监听器。 */
-  const geometryRef = useRef({ columns, cardWidth, cardHeight, rowStep })
-  geometryRef.current = { columns, cardWidth, cardHeight, rowStep }
-
-  const totalRows =
-    activeItems.length === 0 || columns <= 0 ? 0 : Math.ceil(activeItems.length / columns)
-
-  const totalContentHeight =
-    totalRows === 0
-      ? 0
-      : PADDING_TOP +
-        totalRows * cardHeight +
-        Math.max(0, totalRows - 1) * GRID_GAP +
-        PADDING_BOTTOM
-
-  let visibleItems: ClipboardItem[] = []
-  let startIndex = 0
-  if (totalRows > 0 && rowStep > 0) {
-    const topRow = Math.max(0, Math.floor((scrollTop - PADDING_TOP) / rowStep))
-    const bottomRow = Math.min(
-      totalRows - 1,
-      Math.floor((scrollTop + containerHeight - PADDING_TOP) / rowStep),
-    )
-    const bufferedStartRow = Math.max(0, topRow - OVERSCAN_ROWS)
-    const bufferedEndRow = Math.min(totalRows - 1, bottomRow + OVERSCAN_ROWS)
-
-    startIndex = bufferedStartRow * columns
-    const endIndex = Math.min(activeItems.length, (bufferedEndRow + 1) * columns)
-    visibleItems = activeItems.slice(startIndex, endIndex)
+  const totalRows = () => {
+    const list = activeItems()
+    const cols = geometry().cols
+    return list.length === 0 || cols <= 0 ? 0 : Math.ceil(list.length / cols)
   }
 
-  const draggedItem = dragView
-    ? activeItems.find((item) => item.id === dragView.id) ?? null
-    : null
+  const totalContentHeight = () => {
+    const rows = totalRows()
+    const { cardHeight } = geometry()
+    if (rows === 0) return 0
+    return (
+      PADDING_TOP + rows * cardHeight + Math.max(0, rows - 1) * GRID_GAP + PADDING_BOTTOM
+    )
+  }
 
-  const clearOverlay = useCallback(() => {
-    dragItemsRef.current = null
+  const visible = createMemo(() => {
+    const rows = totalRows()
+    const list = activeItems()
+    const { cols, rowStep } = geometry()
+    if (rows === 0 || rowStep <= 0) return { items: [] as ClipboardItem[], startIndex: 0 }
+
+    const top = scrollTop()
+    const viewH = containerHeight()
+    const topRow = Math.max(0, Math.floor((top - PADDING_TOP) / rowStep))
+    const bottomRow = Math.min(rows - 1, Math.floor((top + viewH - PADDING_TOP) / rowStep))
+    const bufferedStartRow = Math.max(0, topRow - OVERSCAN_ROWS)
+    const bufferedEndRow = Math.min(rows - 1, bottomRow + OVERSCAN_ROWS)
+
+    const startIndex = bufferedStartRow * cols
+    const endIndex = Math.min(list.length, (bufferedEndRow + 1) * cols)
+    return { items: list.slice(startIndex, endIndex), startIndex }
+  })
+
+  const draggedItem = () => {
+    const view = dragView()
+    if (!view) return null
+    return activeItems().find((item) => item.id === view.id) ?? null
+  }
+
+  const clearOverlay = () => {
+    dragList = null
     setDragItems(null)
-    if (syncTimerRef.current !== null) {
-      window.clearTimeout(syncTimerRef.current)
-      syncTimerRef.current = null
+    if (syncTimer !== null) {
+      window.clearTimeout(syncTimer)
+      syncTimer = null
     }
-  }, [])
+  }
 
-  /** 浮层跟随鼠标。用 style 直接写，避免每次 pointermove 都重渲染整个网格。 */
-  const applyGhostPosition = useCallback(() => {
-    const session = dragRef.current
-    const ghost = ghostRef.current
-    if (!session || !ghost) return
-    const left = session.pointerX - session.grabX
-    const top = session.pointerY - session.grabY
-    ghost.style.transform = `translate3d(${left}px, ${top}px, 0)`
-  }, [])
+  /** 浮层跟随鼠标。直接写 style，避免每次 pointermove 都触发渲染。 */
+  const applyGhostPosition = () => {
+    if (!session || !ghostEl) return
+    ghostEl.style.transform = `translate3d(${session.pointerX - session.grabX}px, ${
+      session.pointerY - session.grabY
+    }px, 0)`
+  }
 
   /**
    * 根据指针位置计算落点，并在顺序真的变化时更新本地数组。
    *
    * 以被拖卡片的中心去对齐最近的槽位中心；置顶段与未置顶段之间不允许互插。
    */
-  const syncTarget = useCallback(() => {
-    const session = dragRef.current
-    const container = containerRef.current
-    const list = dragItemsRef.current
-    if (!session || !container || !list || list.length === 0) return
+  const syncTarget = () => {
+    const list = dragList
+    if (!session || !containerEl || !list || list.length === 0) return
 
-    const { columns: cols, cardWidth: cw, cardHeight: ch, rowStep: rs } = geometryRef.current
-    if (cols <= 0 || cw <= 0 || rs <= 0) return
+    const { cols, cardWidth, cardHeight, rowStep } = geometry()
+    if (cols <= 0 || cardWidth <= 0 || rowStep <= 0) return
 
-    const rect = container.getBoundingClientRect()
-    const centerX = session.pointerX - rect.left - session.grabX + cw / 2
+    const rect = containerEl.getBoundingClientRect()
+    const centerX = session.pointerX - rect.left - session.grabX + cardWidth / 2
     const centerY =
-      session.pointerY - rect.top + container.scrollTop - session.grabY + ch / 2
+      session.pointerY - rect.top + containerEl.scrollTop - session.grabY + cardHeight / 2
 
-    const col = Math.round((centerX - PADDING_LEFT - cw / 2) / (cw + GRID_GAP))
-    const row = Math.round((centerY - PADDING_TOP - ch / 2) / rs)
+    const col = Math.round((centerX - PADDING_LEFT - cardWidth / 2) / (cardWidth + GRID_GAP))
+    const row = Math.round((centerY - PADDING_TOP - cardHeight / 2) / rowStep)
     const clampedCol = Math.min(cols - 1, Math.max(0, col))
     const clampedRow = Math.max(0, row)
 
@@ -281,353 +254,352 @@ export default function CardGrid({
     const [moved] = next.splice(session.index, 1)
     next.splice(target, 0, moved)
 
-    dragItemsRef.current = next
+    dragList = next
     session.index = target
     setDragItems(next)
-  }, [])
+  }
 
-  const handlePointerMove = useCallback(
-    (event: PointerEvent) => {
-      const pending = pendingRef.current
-      const session = dragRef.current
+  const endDrag = (commit: boolean) => {
+    const current = session
+    pending = null
+    if (!current) return
 
-      if (!session) {
-        if (!pending || event.pointerId !== pending.pointerId) return
-        const distance = Math.hypot(
-          event.clientX - pending.startX,
-          event.clientY - pending.startY,
-        )
-        if (distance < DRAG_THRESHOLD) return
+    const list = dragList
+    session = null
+    document.body.classList.remove('is-dragging-card')
+    setDragView(null)
 
-        // 拖拽正式成立：快照当前顺序，之后所有位置变化都基于它
-        const list = (dragItemsRef.current ?? itemsRef.current).slice()
-        const index = list.findIndex((item) => item.id === pending.id)
-        if (index === -1) {
-          pendingRef.current = null
-          return
-        }
+    try {
+      containerEl?.releasePointerCapture(current.pointerId)
+    } catch {
+      // 指针已经抬起时捕获会自然释放，这里失败无需处理
+    }
 
-        const rect = pending.sourceEl.getBoundingClientRect()
-        const nextSession: DragSession = {
-          id: pending.id,
-          index,
-          pointerId: pending.pointerId,
-          grabX: pending.startX - rect.left,
-          grabY: pending.startY - rect.top,
-          pointerX: event.clientX,
-          pointerY: event.clientY,
-          width: rect.width || geometryRef.current.cardWidth,
-          height: rect.height || geometryRef.current.cardHeight,
-        }
+    if (!commit || !list) {
+      clearOverlay()
+      return
+    }
 
-        // 捕获指针：拖出窗口再松手也能收到 pointerup，不会留下一个卡住的浮层。
-        // 只在越过阈值后才捕获，普通点击仍然落在卡片上。
-        try {
-          containerRef.current?.setPointerCapture(pending.pointerId)
-        } catch {
-          // 某些合成事件没有可捕获的指针，忽略即可
-        }
+    const index = list.findIndex((item) => item.id === current.id)
+    const dragged = index >= 0 ? list[index] : null
+    if (!dragged) {
+      clearOverlay()
+      return
+    }
 
-        dragItemsRef.current = list
-        dragRef.current = nextSession
-        pendingRef.current = null
+    // 落点之后的那一条就是后端需要的 before_id；没有则移到本组末尾
+    const next = list[index + 1]
+    const beforeId = next && next.pinned === dragged.pinned ? next.id : null
 
-        setDragItems(list)
-        setDragView({ id: pending.id, width: nextSession.width, height: nextSession.height })
-        document.body.classList.add('is-dragging-card')
-        event.preventDefault()
+    suppressClick = true
+    window.setTimeout(() => {
+      suppressClick = false
+    }, 0)
+
+    setJustDroppedId(dragged.id)
+    window.setTimeout(() => {
+      setJustDroppedId((value) => (value === dragged.id ? null : value))
+    }, 260)
+
+    send({ type: 'reorder', itemId: dragged.id, beforeId })
+
+    // 乐观顺序保留到宿主 push 回来；超时只是兜底，避免后端异常时界面卡住
+    if (syncTimer !== null) window.clearTimeout(syncTimer)
+    syncTimer = window.setTimeout(() => {
+      syncTimer = null
+      dragList = null
+      setDragItems(null)
+    }, 1500)
+  }
+
+  const handlePointerMove = (event: PointerEvent) => {
+    if (!session) {
+      if (!pending || event.pointerId !== pending.pointerId) return
+      const distance = Math.hypot(event.clientX - pending.startX, event.clientY - pending.startY)
+      if (distance < DRAG_THRESHOLD) return
+
+      // 拖拽正式成立：快照当前顺序，之后所有位置变化都基于它
+      const list = (dragList ?? itemsNow()).slice()
+      const index = list.findIndex((item) => item.id === pending!.id)
+      if (index === -1) {
+        pending = null
         return
       }
 
-      session.pointerX = event.clientX
-      session.pointerY = event.clientY
-      applyGhostPosition()
-      syncTarget()
-      event.preventDefault()
-    },
-    [applyGhostPosition, syncTarget],
-  )
+      const rect = pending.sourceEl.getBoundingClientRect()
+      const nextSession: DragSession = {
+        id: pending.id,
+        index,
+        pointerId: pending.pointerId,
+        grabX: pending.startX - rect.left,
+        grabY: pending.startY - rect.top,
+        pointerX: event.clientX,
+        pointerY: event.clientY,
+        width: rect.width || geometry().cardWidth,
+        height: rect.height || geometry().cardHeight,
+      }
 
-  const endDrag = useCallback(
-    (commit: boolean) => {
-      const session = dragRef.current
-      pendingRef.current = null
-      if (!session) return
-
-      const list = dragItemsRef.current
-      dragRef.current = null
-      document.body.classList.remove('is-dragging-card')
-      setDragView(null)
-
+      // 捕获指针：拖出窗口再松手也能收到 pointerup，不会留下卡住的浮层
       try {
-        containerRef.current?.releasePointerCapture(session.pointerId)
+        containerEl?.setPointerCapture(pending.pointerId)
       } catch {
-        // 指针已经抬起时捕获会自然释放，这里失败无需处理
+        // 某些合成事件没有可捕获的指针，忽略即可
       }
 
-      if (!commit || !list) {
-        clearOverlay()
-        return
-      }
+      dragList = list
+      session = nextSession
+      pending = null
 
-      const index = list.findIndex((item) => item.id === session.id)
-      const dragged = index >= 0 ? list[index] : null
-      if (!dragged) {
-        clearOverlay()
-        return
-      }
+      setDragItems(list)
+      setDragView({ id: nextSession.id, width: nextSession.width, height: nextSession.height })
+      document.body.classList.add('is-dragging-card')
+      event.preventDefault()
+      return
+    }
 
-      // 落点之后的那一条就是后端需要的 before_id；没有则移到本组末尾
-      const next = list[index + 1]
-      const beforeId = next && next.pinned === dragged.pinned ? next.id : null
+    session.pointerX = event.clientX
+    session.pointerY = event.clientY
+    applyGhostPosition()
+    syncTarget()
+    event.preventDefault()
+  }
 
-      suppressClickRef.current = true
-      window.setTimeout(() => {
-        suppressClickRef.current = false
-      }, 0)
+  const handlePointerUp = () => endDrag(true)
+  const handlePointerCancel = () => endDrag(false)
 
-      setJustDroppedId(dragged.id)
-      window.setTimeout(() => {
-        setJustDroppedId((current) => (current === dragged.id ? null : current))
-      }, 260)
-
-      send({ type: 'reorder', itemId: dragged.id, beforeId })
-
-      // 乐观顺序保留到宿主 push 回来。正常情况下下面的 effect 会立刻清掉；
-      // 这里的超时只是兜底，避免后端异常时界面永远停在本地顺序。
-      if (syncTimerRef.current !== null) window.clearTimeout(syncTimerRef.current)
-      syncTimerRef.current = window.setTimeout(() => {
-        syncTimerRef.current = null
-        dragItemsRef.current = null
-        setDragItems(null)
-      }, 1500)
-    },
-    [clearOverlay],
-  )
-
-  const handlePointerUp = useCallback(() => endDrag(true), [endDrag])
-  const handlePointerCancel = useCallback(() => endDrag(false), [endDrag])
-  const handleWindowBlur = useCallback(() => {
-    // Alt+Tab / 窗口失焦时不会有 pointerup，主动收掉浮层，避免它卡在屏幕上
-    if (dragRef.current) endDrag(false)
-  }, [endDrag])
-
-  const handleDragKeyDown = useCallback(
-    (event: KeyboardEvent) => {
+  mount(() => {
+    const onBlur = () => {
+      // Alt+Tab / 窗口失焦时不会有 pointerup，主动收掉浮层
+      if (session) endDrag(false)
+    }
+    const onDragKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
-      if (!dragRef.current && !pendingRef.current) return
+      if (!session && !pending) return
       event.preventDefault()
       // 拖拽中的 Esc 只取消拖拽，不应该顺手把面板关掉
       event.stopImmediatePropagation()
       endDrag(false)
-    },
-    [endDrag],
-  )
+    }
 
-  useEffect(() => {
     window.addEventListener('pointermove', handlePointerMove, { passive: false })
     window.addEventListener('pointerup', handlePointerUp)
     window.addEventListener('pointercancel', handlePointerCancel)
-    window.addEventListener('blur', handleWindowBlur)
-    window.addEventListener('keydown', handleDragKeyDown)
+    window.addEventListener('blur', onBlur)
+    window.addEventListener('keydown', onDragKey)
 
     return () => {
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
       window.removeEventListener('pointercancel', handlePointerCancel)
-      window.removeEventListener('blur', handleWindowBlur)
-      window.removeEventListener('keydown', handleDragKeyDown)
+      window.removeEventListener('blur', onBlur)
+      window.removeEventListener('keydown', onDragKey)
     }
-  }, [
-    handlePointerMove,
-    handlePointerUp,
-    handlePointerCancel,
-    handleWindowBlur,
-    handleDragKeyDown,
-  ])
+  })
 
   // 拖到边缘时自动滚动；指针不动也要继续计算落点。
-  useEffect(() => {
-    if (!dragView) return
+  createEffect(
+    () => dragView(),
+    (view) => {
+      if (!view) return
+      let frame = 0
+      const tick = () => {
+        if (containerEl && session) {
+          const rect = containerEl.getBoundingClientRect()
+          let delta = 0
+          if (session.pointerY < rect.top + AUTO_SCROLL_EDGE) {
+            delta = -Math.min(
+              AUTO_SCROLL_MAX_STEP,
+              (rect.top + AUTO_SCROLL_EDGE - session.pointerY) * 0.45,
+            )
+          } else if (session.pointerY > rect.bottom - AUTO_SCROLL_EDGE) {
+            delta = Math.min(
+              AUTO_SCROLL_MAX_STEP,
+              (session.pointerY - (rect.bottom - AUTO_SCROLL_EDGE)) * 0.45,
+            )
+          }
 
-    let frame = 0
-    const tick = () => {
-      const container = containerRef.current
-      const session = dragRef.current
-      if (container && session) {
-        const rect = container.getBoundingClientRect()
-        let delta = 0
-        if (session.pointerY < rect.top + AUTO_SCROLL_EDGE) {
-          delta = -Math.min(
-            AUTO_SCROLL_MAX_STEP,
-            (rect.top + AUTO_SCROLL_EDGE - session.pointerY) * 0.45,
-          )
-        } else if (session.pointerY > rect.bottom - AUTO_SCROLL_EDGE) {
-          delta = Math.min(
-            AUTO_SCROLL_MAX_STEP,
-            (session.pointerY - (rect.bottom - AUTO_SCROLL_EDGE)) * 0.45,
-          )
-        }
-
-        if (delta !== 0) {
-          const before = container.scrollTop
-          container.scrollTop += delta
-          if (container.scrollTop !== before) {
-            syncTarget()
+          if (delta !== 0) {
+            const before = containerEl.scrollTop
+            containerEl.scrollTop += delta
+            if (containerEl.scrollTop !== before) syncTarget()
           }
         }
+        frame = requestAnimationFrame(tick)
       }
       frame = requestAnimationFrame(tick)
-    }
-
-    frame = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(frame)
-  }, [dragView, syncTarget])
+      return () => cancelAnimationFrame(frame)
+    },
+  )
 
   // 浮层挂载后先摆到当前指针位置，避免第一帧闪到左上角
-  useLayoutEffect(() => {
-    if (dragView) applyGhostPosition()
-  }, [dragView, applyGhostPosition])
+  createEffect(
+    () => dragView(),
+    (view) => {
+      if (view) applyGhostPosition()
+    },
+  )
 
   // 宿主推送的顺序与本地一致时，撤掉乐观覆盖层
-  useEffect(() => {
-    if (!dragItems || dragRef.current) return
-    const sameOrder =
-      items.length === dragItems.length &&
-      items.every((item, index) => item.id === dragItems[index].id)
-    const localIds = new Set(dragItems.map((item) => item.id))
-    const sameSet =
-      items.length === dragItems.length && items.every((item) => localIds.has(item.id))
-    if (sameOrder || !sameSet) {
-      clearOverlay()
-    }
-  }, [items, dragItems, clearOverlay])
+  createEffect(
+    () => [dragItems(), itemsNow()] as const,
+    ([local, incoming]) => {
+      if (!local || session) return
+      const sameOrder =
+        incoming.length === local.length && incoming.every((item, i) => item.id === local[i].id)
+      const localIds = new Set(local.map((item) => item.id))
+      const sameSet =
+        incoming.length === local.length && incoming.every((item) => localIds.has(item.id))
+      if (sameOrder || !sameSet) clearOverlay()
+    },
+  )
 
-  // Keep the selected card in view when selection changes.
-  useEffect(() => {
-    // 拖拽期间由指针决定滚动位置，自动滚动不能和"保持选中项可见"打架
-    if (dragRef.current || pendingRef.current) return
-    const el = containerRef.current
-    if (!el || selectedId === null) return
-    const index = activeItems.findIndex((item) => item.id === selectedId)
-    if (index === -1) return
+  // 保持选中项可见
+  createEffect(
+    () => [props.selectedId(), activeItems(), geometry()] as const,
+    ([selected, list, geo]) => {
+      // 拖拽期间由指针决定滚动位置，不能和自动滚动打架
+      if (session || pending) return
+      if (!containerEl || selected === null) return
+      const index = list.findIndex((item) => item.id === selected)
+      if (index === -1) return
 
-    const row = Math.floor(index / columns)
-    const itemTop = PADDING_TOP + row * rowStep
-    const itemBottom = itemTop + cardHeight
-    const currentScrollTop = el.scrollTop
-    const viewH = el.clientHeight
+      const row = Math.floor(index / geo.cols)
+      const itemTop = PADDING_TOP + row * geo.rowStep
+      const itemBottom = itemTop + geo.cardHeight
+      const currentScrollTop = containerEl.scrollTop
+      const viewH = containerEl.clientHeight
 
-    if (itemTop < currentScrollTop + PADDING_TOP) {
-      el.scrollTop = Math.max(0, itemTop - PADDING_TOP)
-    } else if (itemBottom > currentScrollTop + viewH - PADDING_BOTTOM) {
-      el.scrollTop = itemBottom - viewH + PADDING_BOTTOM
-    }
-  }, [selectedId, activeItems, columns, rowStep, cardHeight])
-
-  // Reset scroll when the dataset shrinks below the current viewport.
-  useEffect(() => {
-    const el = containerRef.current
-    if (el && el.scrollTop > totalContentHeight) {
-      el.scrollTop = 0
-    }
-  }, [activeItems.length, totalContentHeight])
-
-  const handleCardPointerDown = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>, item: ClipboardItem) => {
-      if (event.button !== 0) return
-      // 图钉 / 删除按钮有自己的点击语义，不要被拖拽吞掉
-      if ((event.target as HTMLElement).closest('button')) return
-      if (dragRef.current) return
-
-      pendingRef.current = {
-        id: item.id,
-        startX: event.clientX,
-        startY: event.clientY,
-        pointerId: event.pointerId,
-        sourceEl: event.currentTarget,
+      if (itemTop < currentScrollTop + PADDING_TOP) {
+        containerEl.scrollTop = Math.max(0, itemTop - PADDING_TOP)
+      } else if (itemBottom > currentScrollTop + viewH - PADDING_BOTTOM) {
+        containerEl.scrollTop = itemBottom - viewH + PADDING_BOTTOM
       }
     },
-    [],
   )
 
-  const handleSelect = useCallback(
-    (item: ClipboardItem) => {
-      if (suppressClickRef.current) return
-      onSelect(item)
+  // 数据量缩到视口以下时把滚动位置归零
+  createEffect(
+    () => totalContentHeight(),
+    (height) => {
+      if (containerEl && containerEl.scrollTop > height) {
+        containerEl.scrollTop = 0
+      }
     },
-    [onSelect],
   )
+
+  const onScroll = () => {
+    if (scrollRaf !== null) return
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = null
+      if (containerEl) setScrollTop(containerEl.scrollTop)
+    })
+  }
+
+  const handleCardPointerDown = (event: PointerEvent, item: ClipboardItem) => {
+    if (event.button !== 0) return
+    // 图钉 / 删除按钮有自己的点击语义，不要被拖拽吞掉
+    if ((event.target as HTMLElement).closest('button')) return
+    if (session) return
+
+    pending = {
+      id: item.id,
+      startX: event.clientX,
+      startY: event.clientY,
+      pointerId: event.pointerId,
+      sourceEl: event.currentTarget as HTMLElement,
+    }
+  }
+
+  const selectCard = (item: ClipboardItem) => {
+    if (suppressClick) return
+    props.onSelect(item)
+  }
 
   return (
     <>
-      <div ref={containerRef} className="viewport-container" onScroll={onScroll}>
-        <div className="virtual-spacer" style={{ height: `${totalContentHeight}px` }}>
-          <div className="visible-grid">
-            {visibleItems.map((item, offset) => {
-              const index = startIndex + offset
-              const row = Math.floor(index / columns)
-              const col = index % columns
-              const x = PADDING_LEFT + col * (cardWidth + GRID_GAP)
-              const y = PADDING_TOP + row * rowStep
-              const isSource = dragView?.id === item.id
-
-              return (
-                <div
-                  key={item.id}
-                  className={`card-slot${isSource ? ' is-drag-source' : ''}${
-                    justDroppedId === item.id ? ' just-dropped' : ''
-                  }`}
-                  style={{
-                    width: `${cardWidth}px`,
-                    height: `${cardHeight}px`,
-                    transform: `translate3d(${x}px, ${y}px, 0)`,
-                  }}
-                  onPointerDown={(event) => handleCardPointerDown(event, item)}
-                  onDragStart={(event) => event.preventDefault()}
-                >
-                  <ClipCard
-                    item={item}
-                    thumbnail={thumbnails[item.id]}
-                    onRequestThumbnail={onRequestThumbnail}
-                    selected={item.id === selectedId}
-                    tagColor={tagColors && item.tag ? tagColors[item.tag] : undefined}
-                    onSelect={handleSelect}
-                    onDoubleClick={onDoubleClick}
-                    onPaste={onPaste}
-                    onTogglePin={onTogglePin}
-                    onRemove={onRemove}
-                    onContextMenu={onContextMenu}
-                  />
-                  {isSource && <div className="drop-slot" aria-hidden="true" />}
-                </div>
-              )
-            })}
+      <div ref={containerEl} class="viewport-container" onScroll={onScroll}>
+        <div class="virtual-spacer" style={{ height: `${totalContentHeight()}px` }}>
+          <div class="visible-grid">
+            <For each={visible().items}>
+              {(item, offset) => {
+                const index = () => visible().startIndex + offset()
+                const position = createMemo(() => {
+                  const { cols, cardWidth, rowStep } = geometry()
+                  const row = Math.floor(index() / cols)
+                  const col = index() % cols
+                  return {
+                    x: PADDING_LEFT + col * (cardWidth + GRID_GAP),
+                    y: PADDING_TOP + row * rowStep,
+                  }
+                })
+                const isSource = () => dragView()?.id === item.id
+                return (
+                  <div
+                    class={[
+                      'card-slot',
+                      {
+                        'is-drag-source': isSource(),
+                        'just-dropped': justDroppedId() === item.id,
+                      },
+                    ]}
+                    style={{
+                      width: `${geometry().cardWidth}px`,
+                      height: `${geometry().cardHeight}px`,
+                      transform: `translate3d(${position().x}px, ${position().y}px, 0)`,
+                    }}
+                    onPointerDown={(event) => handleCardPointerDown(event, item)}
+                    onDragStart={(event) => event.preventDefault()}
+                  >
+                    <ClipCard
+                      item={item}
+                      thumbnail={() => props.thumbnails()[item.id]}
+                      onRequestThumbnail={props.onRequestThumbnail}
+                      selected={() => item.id === props.selectedId()}
+                      tagColor={() => (item.tag ? props.tagColors()[item.tag] : undefined)}
+                      onSelect={selectCard}
+                      onDoubleClick={props.onDoubleClick}
+                      onPaste={props.onPaste}
+                      onTogglePin={props.onTogglePin}
+                      onRemove={props.onRemove}
+                      onContextMenu={props.onContextMenu}
+                    />
+                    <Show when={isSource()}>
+                      <div class="drop-slot" aria-hidden="true" />
+                    </Show>
+                  </div>
+                )
+              }}
+            </For>
           </div>
         </div>
       </div>
 
       {/* 浮层放在滚动容器外面：viewport 的 contain 会让 fixed 元素被裁剪 */}
-      {dragView && draggedItem && (
-        <div
-          ref={ghostRef}
-          className="drag-ghost"
-          style={{ width: `${dragView.width}px`, height: `${dragView.height}px` }}
-          aria-hidden="true"
-        >
-          <ClipCard
-            item={draggedItem}
-            thumbnail={thumbnails[draggedItem.id]}
-            onRequestThumbnail={() => {}}
-            selected={false}
-            tagColor={tagColors && draggedItem.tag ? tagColors[draggedItem.tag] : undefined}
-            onSelect={() => {}}
-            onPaste={() => {}}
-            onTogglePin={() => {}}
-            onRemove={() => {}}
-          />
-        </div>
-      )}
+      <Show when={dragView() && draggedItem()}>
+        {(_) => {
+          const dragged = () => draggedItem()!
+          return (
+            <div
+              ref={ghostEl}
+              class="drag-ghost"
+              style={{ width: `${dragView()!.width}px`, height: `${dragView()!.height}px` }}
+              aria-hidden="true"
+            >
+              <ClipCard
+                item={dragged()}
+                thumbnail={() => props.thumbnails()[dragged().id]}
+                onRequestThumbnail={() => {}}
+                selected={() => false}
+                tagColor={() => (dragged().tag ? props.tagColors()[dragged().tag!] : undefined)}
+                onSelect={() => {}}
+                onPaste={() => {}}
+                onTogglePin={() => {}}
+                onRemove={() => {}}
+              />
+            </div>
+          )
+        }}
+      </Show>
     </>
   )
 }

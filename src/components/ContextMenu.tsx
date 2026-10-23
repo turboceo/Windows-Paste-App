@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js'
 import type { ClipboardItem } from '../types'
 import { TAG_COLOR_PALETTE, getTagColor } from '../tagColors'
 import { extractOcrText, hasOcrText } from '../ocr'
+import { useWindowEvent } from '../solid-utils'
 
 export interface ContextMenuState {
   visible: boolean
@@ -11,9 +12,9 @@ export interface ContextMenuState {
 }
 
 interface ContextMenuProps {
-  menu: ContextMenuState
-  allTags: string[]
-  tagColors?: Record<string, string>
+  menu: () => ContextMenuState
+  allTags: () => string[]
+  tagColors: () => Record<string, string>
   onClose: () => void
   onPaste: (item: ClipboardItem) => void
   onCopyText?: (text: string) => void
@@ -25,449 +26,393 @@ interface ContextMenuProps {
   onSaveTagColor?: (tag: string, color: string) => void
 }
 
-
 /**
  * 鼠标离开"添加到分类"一行后，延迟多久收起子菜单。
  *
- * 用 debounce 而不是 throttle：
- * throttle 是"首次立即执行、之后限频"，鼠标一离开就会立刻收起一次，
- * 子菜单照样瞬间消失。这里要的是"离开后等一会儿，期间回来就取消"。
- *
- * 160ms 足够覆盖从主菜单斜向划入子菜单的时间（中间要穿过 4px 的间隙），
- * 又短到不像卡顿。
+ * 用 debounce 而不是 throttle：子菜单与主菜单之间有 4px 间隙，鼠标斜着
+ * 划过去时会先落到空隙里触发 mouseleave。等一会儿再收，给它穿过的余量。
  */
 const SUBMENU_CLOSE_DELAY = 160
 
-export default function ContextMenu({
-  menu,
-  allTags,
-  tagColors,
-  onClose,
-  onPaste,
-  onCopyText,
-  onRunOcr,
-  onViewOcr,
-  onTogglePin,
-  onRemove,
-  onSetTag,
-  onSaveTagColor,
-}: ContextMenuProps) {
-  const [showSubMenu, setShowSubMenu] = useState(false)
-  const [isCreatingTag, setIsCreatingTag] = useState(false)
-  const [newTagInput, setNewTagInput] = useState('')
-  const [selectedColor, setSelectedColor] = useState<string>(TAG_COLOR_PALETTE[0])
-  const [colorEditingTag, setColorEditingTag] = useState<string | null>(null)
-  const menuRef = useRef<HTMLDivElement | null>(null)
-  const inputRef = useRef<HTMLInputElement | null>(null)
+/**
+ * 卡片右键菜单。
+ *
+ * 定位策略（Solid 版本）：每次菜单打开都是一个全新的节点（由外层的
+ * `keyed` 渲染保证），所以 ref 回调只会在挂载时跑一次，量完真实尺寸
+ * 直接把 left/top 写进 style。整个过程不触发任何响应式更新，
+ * 不存在"测量 → 更新 state → 再测量"的循环。
+ */
+export default function ContextMenu(props: ContextMenuProps) {
+  const [showSubMenu, setShowSubMenu] = createSignal(false)
+  const [isCreatingTag, setIsCreatingTag] = createSignal(false)
+  const [newTagInput, setNewTagInput] = createSignal('')
+  const [selectedColor, setSelectedColor] = createSignal<string>(TAG_COLOR_PALETTE[0])
+  const [colorEditingTag, setColorEditingTag] = createSignal<string | null>(null)
+
+  let menuEl: HTMLDivElement | undefined
+  let subMenuEl: HTMLDivElement | undefined
+  let inputEl: HTMLInputElement | undefined
   /** 收起子菜单的延时任务；鼠标回到主菜单项时要取消它 */
-  const closeTimerRef = useRef<number | null>(null)
+  let closeTimer: number | null = null
 
-  const cancelScheduledClose = useCallback(() => {
-    if (closeTimerRef.current !== null) {
-      window.clearTimeout(closeTimerRef.current)
-      closeTimerRef.current = null
+  // 只列数据库里真实存在的分类。
+  // 声明必须放在所有 effect 之前：Solid 的 compute 在创建时就同步执行，
+  // 而 const 在初始化前处于暂时性死区（TDZ），后置声明会直接抛
+  // "Cannot access before initialization"。
+  const mergedTags = () => Array.from(new Set(props.allTags())).filter(Boolean)
+
+  const cancelScheduledClose = () => {
+    if (closeTimer !== null) {
+      window.clearTimeout(closeTimer)
+      closeTimer = null
     }
-  }, [])
+  }
 
-  /** 立即展开子菜单（并取消任何待执行的收起）。 */
   const openSubMenu = () => {
     cancelScheduledClose()
     setShowSubMenu(true)
   }
 
-  /**
-   * 延迟收起子菜单。
-   *
-   * 直接 `setShowSubMenu(false)` 是不行的：子菜单与主菜单项之间有 4px 的
-   * margin，鼠标斜着划过去时会先落到空隙里，`mouseleave` 当场触发，
-   * 子菜单在用户点到之前就被卸载了。等一会儿再收，给鼠标留出穿过的余量。
-   */
-  const scheduleCloseSubMenu = useCallback(() => {
+  const scheduleCloseSubMenu = () => {
     // 正在输入新标签时绝不收起，否则输一半的标签会连同菜单一起消失
-    if (isCreatingTag) return
+    if (isCreatingTag()) return
     cancelScheduledClose()
-    closeTimerRef.current = window.setTimeout(() => {
-      closeTimerRef.current = null
+    closeTimer = window.setTimeout(() => {
+      closeTimer = null
       setShowSubMenu(false)
     }, SUBMENU_CLOSE_DELAY)
-  }, [isCreatingTag, cancelScheduledClose])
-
-  // 组件卸载时清掉挂起的定时器
-  useEffect(() => cancelScheduledClose, [cancelScheduledClose])
-
-  // 菜单关掉、或右键了另一张卡片时，重置子菜单与输入态。
-  //
-  // 这个组件在菜单隐藏时只是 `return null`、并不会卸载，所以 state 会留着：
-  // 不重置的话，"展开子菜单 → 关闭 → 右键另一张卡"会看到子菜单自动弹出来。
-  //
-  // 注意这里**不**碰位置：位置由 `<div key>` 重新挂载 + ref 回调一次性算出，
-  // 一旦把位置也塞进这个 effect，就会和测量逻辑形成互相触发的更新循环
-  // （测量 → setState → 重置 → 再测量），重则抛 Maximum update depth exceeded、
-  // 整棵 React 树被卸载成白屏。
-  useEffect(() => {
-    cancelScheduledClose()
-    setShowSubMenu(false)
-    setIsCreatingTag(false)
-    setNewTagInput('')
-    setColorEditingTag(null)
-    setSelectedColor(TAG_COLOR_PALETTE[0])
-  }, [menu.visible, menu.item?.id, cancelScheduledClose])
-
-  // 只列数据库里真实存在的分类。
-  //
-  // 之前这里还并了一组硬编码的 PRESET_TAGS，后果是"删掉的标签下次又出现"——
-  // 前端无条件把它塞回候选列表，用户会以为删除功能坏了。
-  const mergedTags = Array.from(new Set(allTags)).filter(Boolean)
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        onClose()
-      }
-    }
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        onClose()
-      }
-    }
-    if (menu.visible) {
-      window.addEventListener('mousedown', handleClickOutside)
-      window.addEventListener('keydown', handleKeyDown)
-    }
-    return () => {
-      window.removeEventListener('mousedown', handleClickOutside)
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [menu.visible, onClose])
-
-  useEffect(() => {
-    if (isCreatingTag) {
-      inputRef.current?.focus()
-    }
-  }, [isCreatingTag])
-
-  // 定位：在节点挂载的那一帧量一次真实尺寸，直接写 style，不经过 React state。
-  //
-  // 为什么不用 state + useLayoutEffect：那会让"测量 → setState → 重渲染"
-  // 和别的 effect 互相触发，形成更新死循环（生产构建里会直接抛
-  // Maximum update depth exceeded，整棵 React 树被卸载 —— 白屏）。
-  // 用 ref 回调 + 命令式写 style，一次算完就结束，循环从结构上不存在。
-  //
-  // 配合 `<div key={menuKey}>`：每次右键都是全新节点，ref 回调必然重跑，
-  // 所以不需要"位置变了要重新测量"这类依赖。
-  const menuKey = `${menu.item?.id ?? '-'}:${menu.x}:${menu.y}`
-
-  const positionMenu = useCallback(
-    (el: HTMLDivElement | null) => {
-      menuRef.current = el
-      if (!el) return
-
-      const gap = 8
-      const rect = el.getBoundingClientRect()
-
-      // 期望位置以鼠标坐标为准；放不下就整体左移/上移，保证完整可见。
-      const x = Math.max(gap, Math.min(menu.x, window.innerWidth - rect.width - gap))
-      const y = Math.max(gap, Math.min(menu.y, window.innerHeight - rect.height - gap))
-
-      el.style.left = `${x}px`
-      el.style.top = `${y}px`
-      // 位置算好了才显形：避免菜单先在旧位置/左上角闪一下
-      el.style.visibility = 'visible'
-    },
-    [menu.x, menu.y],
-  )
-
-  // 子菜单的翻边与高度限制。
-  //
-  // 同样的思路：不用 useLayoutEffect + state，而是每次 showSubMenu 变化后
-  // 量一次、直接改 class 和 style。翻边是"改一次就不再变"的幂等操作，
-  // 不存在反复触发的风险。
-  useEffect(() => {
-    if (!showSubMenu) return
-    const menuEl = menuRef.current
-    if (!menuEl) return
-
-    const subMenu = menuEl.querySelector<HTMLElement>('.paste-sub-menu')
-    if (!subMenu) return
-
-    // 先按默认方向（右侧）量一次
-    subMenu.classList.remove('flip-left')
-    subMenu.style.maxHeight = ''
-
-    const gap = 10
-    const first = subMenu.getBoundingClientRect()
-    if (first.right > window.innerWidth - gap) {
-      // 右边放不下：翻到主菜单左侧，翻完再量一次高度
-      subMenu.classList.add('flip-left')
-    }
-
-    const rect = subMenu.getBoundingClientRect()
-    const available = window.innerHeight - rect.top - gap
-    // 标签特别多时限制高度、内部滚动，避免子菜单溢出视口底部
-    if (available > 120 && rect.height > available) {
-      subMenu.style.maxHeight = `${available}px`
-    }
-  }, [showSubMenu, mergedTags.length, isCreatingTag])
-
-  if (!menu.visible || !menu.item) {
-    return null
   }
 
-  const { item } = menu
+  onCleanup(cancelScheduledClose)
 
-  function handleCreateTagSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    const trimmed = newTagInput.trim()
-    if (trimmed && item) {
-      if (selectedColor && onSaveTagColor) {
-        onSaveTagColor(trimmed, selectedColor)
-      }
-      onSetTag(item, trimmed)
+  // 菜单关掉、或右键了另一张卡片时，重置子菜单与输入态。
+  // 位置不在这里重置——它由节点重新挂载时的一次性测量负责。
+  createEffect(
+    // compute：只读依赖
+    () => [props.menu().visible, props.menu().item?.id],
+    // apply：重置子菜单与输入态
+    () => {
+      cancelScheduledClose()
+      setShowSubMenu(false)
       setIsCreatingTag(false)
       setNewTagInput('')
-      onClose()
+      setColorEditingTag(null)
+      setSelectedColor(TAG_COLOR_PALETTE[0])
+    },
+  )
+
+  // 点外面或按 Esc 关闭。用 window 监听，避免菜单内部的点击冒泡到卡片。
+  useWindowEvent('mousedown', (event) => {
+    if (!props.menu().visible) return
+    if (menuEl && !menuEl.contains(event.target as Node)) {
+      props.onClose()
     }
+  })
+
+  useWindowEvent('keydown', (event) => {
+    if (!props.menu().visible) return
+    if (event.key === 'Escape') props.onClose()
+  })
+
+  // 进入输入态后自动聚焦
+  createEffect(
+    () => isCreatingTag(),
+    (creating) => {
+      if (creating) queueMicrotask(() => inputEl?.focus())
+    },
+  )
+
+  // 子菜单翻边与高度限制：只在展开时量一次，直接改 class/style。
+  createEffect(
+    () => [showSubMenu(), mergedTags().length, isCreatingTag()],
+    () => {
+      if (!showSubMenu()) return
+      // 让 Solid 先完成子菜单的 DOM 插入
+      queueMicrotask(() => {
+        const el = subMenuEl
+        if (!el) return
+
+        el.classList.remove('flip-left')
+        el.style.maxHeight = ''
+
+        const gap = 10
+        const first = el.getBoundingClientRect()
+        if (first.right > window.innerWidth - gap) {
+          el.classList.add('flip-left')
+        }
+
+        const rect = el.getBoundingClientRect()
+        const available = window.innerHeight - rect.top - gap
+        if (available > 120 && rect.height > available) {
+          el.style.maxHeight = `${available}px`
+        }
+      })
+    },
+  )
+
+  /** 挂载时量一次真实尺寸，把菜单摆到不与视口边缘重叠的位置 */
+  const positionMenu = (el: HTMLDivElement) => {
+    menuEl = el
+    const { x, y } = props.menu()
+    const gap = 8
+    const rect = el.getBoundingClientRect()
+    const left = Math.max(gap, Math.min(x, window.innerWidth - rect.width - gap))
+    const top = Math.max(gap, Math.min(y, window.innerHeight - rect.height - gap))
+    el.style.left = `${left}px`
+    el.style.top = `${top}px`
+    el.style.visibility = 'visible'
+  }
+
+  const submitNewTag = (event: SubmitEvent) => {
+    event.preventDefault()
+    const item = props.menu().item
+    const trimmed = newTagInput().trim()
+    if (!item || !trimmed) return
+
+    props.onSaveTagColor?.(trimmed, selectedColor())
+    props.onSetTag(item, trimmed)
+    setIsCreatingTag(false)
+    setNewTagInput('')
+    props.onClose()
   }
 
   return (
-    <div
-      key={menuKey}
-      ref={positionMenu}
-      className="paste-context-menu"
-      style={{ visibility: 'hidden' }}
-      onContextMenu={(e) => e.preventDefault()}
-    >
-      {/* 1. 立即粘贴 */}
-      <div
-        className="menu-item"
-        onClick={() => {
-          onPaste(item)
-          onClose()
-        }}
-      >
-        <span className="item-glyph">&#xE77F;</span>
-        <span className="item-label">立即粘贴</span>
-        <kbd className="item-shortcut">Enter</kbd>
-      </div>
+    <Show when={props.menu().visible && props.menu().item}>
+      {(item) => (
+        <div
+          ref={positionMenu}
+          class="paste-context-menu"
+          style={{ visibility: 'hidden' }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          {/* 1. 立即粘贴 */}
+          <div
+            class="menu-item"
+            onClick={() => {
+              props.onPaste(item())
+              props.onClose()
+            }}
+          >
+            <span class="item-glyph">&#xE77F;</span>
+            <span class="item-label">立即粘贴</span>
+            <kbd class="item-shortcut">Enter</kbd>
+          </div>
 
-      {/* 2. 置顶/取消置顶 */}
-      <div
-        className="menu-item"
-        onClick={() => {
-          onTogglePin(item)
-          onClose()
-        }}
-      >
-        <span className="item-glyph">{item.pinned ? '\uE840' : '\uE718'}</span>
-        <span className="item-label">{item.pinned ? '取消置顶' : '置顶卡片'}</span>
-        <kbd className="item-shortcut">Ctrl+P</kbd>
-      </div>
+          {/* 2. 置顶/取消置顶 */}
+          <div
+            class="menu-item"
+            onClick={() => {
+              props.onTogglePin(item())
+              props.onClose()
+            }}
+          >
+            <span class="item-glyph">{item().pinned ? '\uE840' : '\uE718'}</span>
+            <span class="item-label">{item().pinned ? '取消置顶' : '置顶卡片'}</span>
+            <kbd class="item-shortcut">Ctrl+P</kbd>
+          </div>
 
-      {/* 2.5 图片卡片：OCR 文本提取 */}
-      {item.type === 'Image' && (
-        <>
-          {hasOcrText(item.content, item.type) ? (
-            <>
-              <div
-                className="menu-item"
-                onClick={() => {
-                  onViewOcr?.(item)
-                  onClose()
-                }}
-              >
-                <span className="item-glyph">&#xE8A5;</span>
-                <span className="item-label">查看识别文字</span>
-              </div>
-              <div
-                className="menu-item"
-                onClick={() => {
-                  const ocrText = extractOcrText(item.content)
-                  if (ocrText && onCopyText) {
-                    onCopyText(ocrText)
-                  }
-                  onClose()
-                }}
-              >
-                <span className="item-glyph">&#xE8C8;</span>
-                <span className="item-label">复制图片中的文字 (OCR)</span>
-              </div>
-            </>
-          ) : (
-            <div
-              className="menu-item"
-              title="已存在的图片也能随时补做一次文字识别"
-              onClick={() => {
-                onRunOcr?.(item)
-                onClose()
-              }}
-            >
-              <span className="item-glyph">&#xE8C1;</span>
-              <span className="item-label">识别图片中的文字 (OCR)</span>
-            </div>
-          )}
-        </>
-      )}
-
-      <div className="menu-divider" />
-
-      {/* 3. 添加到分类 / 修改分类 (展开二级菜单) */}
-      <div
-        className="menu-item has-submenu"
-        onMouseEnter={openSubMenu}
-        onMouseLeave={scheduleCloseSubMenu}
-      >
-        <span className="item-glyph">&#xE8EC;</span>
-        <span className="item-label">
-          {item.tag ? `分类: ${item.tag}` : '添加到分类'}
-        </span>
-        <span className="arrow-glyph">&#xE76C;</span>
-
-        {/* 二级菜单：选择或新建分类 */}
-        {showSubMenu && (
-          <div className="paste-sub-menu">
-            {item.tag && (
-              <>
+          {/* 3. 图片卡片：OCR 文本提取 */}
+          <Show when={item().type === 'Image'}>
+            <Show
+              when={hasOcrText(item().content, item().type)}
+              fallback={
                 <div
-                  className="menu-item remove-tag"
+                  class="menu-item"
+                  title="已存在的图片也能随时补做一次文字识别"
                   onClick={() => {
-                    onSetTag(item, null)
-                    onClose()
+                    props.onRunOcr?.(item())
+                    props.onClose()
                   }}
                 >
-                  <span className="item-glyph">&#xE711;</span>
-                  <span className="item-label">清除当前分类</span>
+                  <span class="item-glyph">&#xE8C1;</span>
+                  <span class="item-label">识别图片中的文字 (OCR)</span>
                 </div>
-                <div className="menu-divider" />
-              </>
-            )}
-
-            <div className="submenu-title">选择分类：</div>
-
-            {mergedTags.map((tag) => {
-              const isActive = item.tag === tag
-              const dotColor = getTagColor(tag, tagColors)
-              const isEditingThis = colorEditingTag === tag
-              return (
-                <div key={tag} className="tag-item-container">
-                  <div
-                    className={`menu-item tag-item${isActive ? ' active-tag' : ''}`}
-                    onClick={() => {
-                      onSetTag(item, tag)
-                      onClose()
-                    }}
-                  >
-                    <span className="tag-dot" style={{ backgroundColor: dotColor }} />
-                    <span className="item-label">{tag}</span>
-                    {isActive && <span className="check-glyph">&#xE73E;</span>}
-                    <button
-                      type="button"
-                      className="tag-palette-trigger"
-                      title="修改此分类颜色"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        cancelScheduledClose()
-                        setColorEditingTag(isEditingThis ? null : tag)
-                      }}
-                    >
-                      &#xE790;
-                    </button>
-                  </div>
-
-                  {/* 展开的调色盘小栏 */}
-                  {isEditingThis && (
-                    <div
-                      className="tag-item-inline-palette"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {TAG_COLOR_PALETTE.map((c) => (
-                        <button
-                          key={c}
-                          type="button"
-                          className={`palette-color-btn${dotColor === c ? ' active' : ''}`}
-                          style={{ backgroundColor: c }}
-                          title={c}
-                          onClick={() => {
-                            if (onSaveTagColor) {
-                              onSaveTagColor(tag, c)
-                            }
-                          }}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-
-            <div className="menu-divider" />
-
-            {/* 新建分类输入框与调色盘 */}
-            {!isCreatingTag ? (
+              }
+            >
               <div
-                className="menu-item new-tag"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  // 进入输入态后子菜单不能再被自动收起
-                  cancelScheduledClose()
-                  setIsCreatingTag(true)
+                class="menu-item"
+                onClick={() => {
+                  props.onViewOcr?.(item())
+                  props.onClose()
                 }}
               >
-                <span className="item-glyph">&#xE710;</span>
-                <span className="item-label">新建分类标签</span>
+                <span class="item-glyph">&#xE8A5;</span>
+                <span class="item-label">查看识别文字</span>
               </div>
-            ) : (
-              <form className="new-tag-form" onSubmit={handleCreateTagSubmit} onClick={(e) => e.stopPropagation()}>
-                <div className="new-tag-input-row">
-                  <span
-                    className="selected-color-preview"
-                    style={{ backgroundColor: selectedColor }}
-                    title="当前选择的颜色"
-                  />
-                  <input
-                    ref={inputRef}
-                    className="new-tag-input"
-                    type="text"
-                    placeholder="标签名称..."
-                    value={newTagInput}
-                    onChange={(e) => setNewTagInput(e.target.value)}
-                    maxLength={12}
-                  />
-                  <button type="submit" className="new-tag-confirm" title="确认">
-                    &#xE73E;
-                  </button>
-                </div>
-                <div className="color-palette-row">
-                  {TAG_COLOR_PALETTE.map((color) => (
-                    <button
-                      key={color}
-                      type="button"
-                      className={`palette-color-btn${selectedColor === color ? ' active' : ''}`}
-                      style={{ backgroundColor: color }}
-                      onClick={() => setSelectedColor(color)}
-                      title={color}
-                    />
-                  ))}
-                </div>
-              </form>
-            )}
+              <div
+                class="menu-item"
+                onClick={() => {
+                  const ocrText = extractOcrText(item().content)
+                  if (ocrText) props.onCopyText?.(ocrText)
+                  props.onClose()
+                }}
+              >
+                <span class="item-glyph">&#xE8C8;</span>
+                <span class="item-label">复制图片中的文字 (OCR)</span>
+              </div>
+            </Show>
+          </Show>
+
+          <div class="menu-divider" />
+
+          {/* 4. 添加到分类 / 修改分类（展开二级菜单） */}
+          <div
+            class="menu-item has-submenu"
+            onMouseEnter={openSubMenu}
+            onMouseLeave={scheduleCloseSubMenu}
+          >
+            <span class="item-glyph">&#xE8EC;</span>
+            <span class="item-label">
+              {item().tag ? `分类: ${item().tag}` : '添加到分类'}
+            </span>
+            <span class="arrow-glyph">&#xE76C;</span>
+
+            <Show when={showSubMenu()}>
+              <div class="paste-sub-menu" ref={subMenuEl}>
+                <Show when={item().tag}>
+                  <div
+                    class="menu-item remove-tag"
+                    onClick={() => {
+                      props.onSetTag(item(), null)
+                      props.onClose()
+                    }}
+                  >
+                    <span class="item-glyph">&#xE711;</span>
+                    <span class="item-label">清除当前分类</span>
+                  </div>
+                  <div class="menu-divider" />
+                </Show>
+
+                <div class="submenu-title">选择分类：</div>
+
+                <For each={mergedTags()}>
+                  {(tag) => {
+                    const dotColor = () => getTagColor(tag, props.tagColors())
+                    const isActive = () => item().tag === tag
+                    const isEditingThis = () => colorEditingTag() === tag
+                    return (
+                      <div class="tag-item-container">
+                        <div
+                          class={["menu-item", "tag-item", { 'active-tag': isActive() }]}
+                          onClick={() => {
+                            props.onSetTag(item(), tag)
+                            props.onClose()
+                          }}
+                        >
+                          <span class="tag-dot" style={{ 'background-color': dotColor() }} />
+                          <span class="item-label">{tag}</span>
+                          <Show when={isActive()}>
+                            <span class="check-glyph">&#xE73E;</span>
+                          </Show>
+                          <button
+                            type="button"
+                            class="tag-palette-trigger"
+                            title="修改此分类颜色"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              cancelScheduledClose()
+                              setColorEditingTag(isEditingThis() ? null : tag)
+                            }}
+                          >
+                            &#xE790;
+                          </button>
+                        </div>
+
+                        <Show when={isEditingThis()}>
+                          <div class="tag-item-inline-palette" onClick={(e) => e.stopPropagation()}>
+                            <For each={TAG_COLOR_PALETTE}>
+                              {(color) => (
+                                <button
+                                  type="button"
+                                  class={["palette-color-btn", { active: dotColor() === color }]}
+                                  style={{ 'background-color': color }}
+                                  title={color}
+                                  onClick={() => props.onSaveTagColor?.(tag, color)}
+                                />
+                              )}
+                            </For>
+                          </div>
+                        </Show>
+                      </div>
+                    )
+                  }}
+                </For>
+
+                <div class="menu-divider" />
+
+                {/* 新建分类输入框与调色盘 */}
+                <Show
+                  when={isCreatingTag()}
+                  fallback={
+                    <div
+                      class="menu-item new-tag"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        // 进入输入态后子菜单不能再被自动收起
+                        cancelScheduledClose()
+                        setIsCreatingTag(true)
+                      }}
+                    >
+                      <span class="item-glyph">&#xE710;</span>
+                      <span class="item-label">新建分类标签</span>
+                    </div>
+                  }
+                >
+                  <form class="new-tag-form" onSubmit={submitNewTag} onClick={(e) => e.stopPropagation()}>
+                    <div class="new-tag-input-row">
+                      <span
+                        class="selected-color-preview"
+                        style={{ 'background-color': selectedColor() }}
+                        title="当前选择的颜色"
+                      />
+                      <input
+                        ref={inputEl}
+                        class="new-tag-input"
+                        type="text"
+                        placeholder="标签名称..."
+                        value={newTagInput()}
+                        maxlength={12}
+                        onInput={(event) => setNewTagInput(event.currentTarget.value)}
+                      />
+                      <button type="submit" class="new-tag-confirm" title="确认">
+                        &#xE73E;
+                      </button>
+                    </div>
+                    <div class="color-palette-row">
+                      <For each={TAG_COLOR_PALETTE}>
+                        {(color) => (
+                          <button
+                            type="button"
+                            class={["palette-color-btn", { active: selectedColor() === color }]}
+                            style={{ 'background-color': color }}
+                            title={color}
+                            onClick={() => setSelectedColor(color)}
+                          />
+                        )}
+                      </For>
+                    </div>
+                  </form>
+                </Show>
+              </div>
+            </Show>
           </div>
-        )}
-      </div>
 
-      <div className="menu-divider" />
+          <div class="menu-divider" />
 
-      {/* 4. 删除卡片 */}
-      <div
-        className="menu-item danger"
-        onClick={() => {
-          onRemove(item)
-          onClose()
-        }}
-      >
-        <span className="item-glyph">&#xE74D;</span>
-        <span className="item-label">删除记录</span>
-        <kbd className="item-shortcut">Del</kbd>
-      </div>
-    </div>
+          {/* 5. 删除卡片 */}
+          <div
+            class="menu-item danger"
+            onClick={() => {
+              props.onRemove(item())
+              props.onClose()
+            }}
+          >
+            <span class="item-glyph">&#xE74D;</span>
+            <span class="item-label">删除记录</span>
+            <kbd class="item-shortcut">Del</kbd>
+          </div>
+        </div>
+      )}
+    </Show>
   )
 }

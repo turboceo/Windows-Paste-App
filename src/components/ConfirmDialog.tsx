@@ -1,4 +1,5 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { Show, createEffect } from 'solid-js'
+import type { JSX } from '@solidjs/web'
 
 interface ConfirmDialogProps {
   open: boolean
@@ -13,7 +14,7 @@ interface ConfirmDialogProps {
    * 保证同样的危险操作在不同入口看起来一致。
    */
   danger?: boolean
-  children: ReactNode
+  children: JSX.Element
   onConfirm: () => void
   onCancel: () => void
 }
@@ -23,55 +24,48 @@ interface ConfirmDialogProps {
  *
  * 用在"导入 / 清空 / 删除分类"这类不可撤销、但影响面又不大的操作上：
  * 先把后果说清楚，再让用户点确认，而不是点一下菜单就直接改数据库。
- *
- * 破坏性操作用 `danger`，主按钮会变红。三个入口（清空历史、删除分类）
- * 共用同一个标记，保证同样的危险操作在任何地方看起来都一致。
  */
-export default function ConfirmDialog({
-  open,
-  title,
-  confirmLabel,
-  cancelLabel = '取消',
-  danger = false,
-  children,
-  onConfirm,
-  onCancel,
-}: ConfirmDialogProps) {
-  const confirmRef = useRef<HTMLButtonElement | null>(null)
+export default function ConfirmDialog(props: ConfirmDialogProps) {
+  let confirmRef: HTMLButtonElement | undefined
 
-  useEffect(() => {
-    if (!open) return
-    // 打开时把焦点放到确认按钮，键盘可以直接回车
-    confirmRef.current?.focus()
-  }, [open])
-
-  if (!open) return null
+  // 打开时把焦点放到确认按钮，键盘可以直接回车。
+  // 两段式 createEffect：compute 跟踪 open，apply 里做副作用。
+  createEffect(
+    () => props.open,
+    (open) => {
+      if (!open) return
+      // 等 DOM 插入后再聚焦，否则 ref 还是 undefined
+      queueMicrotask(() => confirmRef?.focus())
+    },
+  )
 
   return (
-    <div className="dialog-backdrop" onMouseDown={onCancel}>
-      <div
-        className="dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <h2 className="dialog-title">{title}</h2>
-        <div className="dialog-body">{children}</div>
+    <Show when={props.open}>
+      <div class="dialog-backdrop" onMouseDown={() => props.onCancel()}>
+        <div
+          class="dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-label={props.title}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <h2 class="dialog-title">{props.title}</h2>
+          <div class="dialog-body">{props.children}</div>
 
-        <div className="dialog-actions">
-          <button className="dialog-btn" onClick={onCancel}>
-            {cancelLabel}
-          </button>
-          <button
-            ref={confirmRef}
-            className={danger ? 'dialog-btn primary danger' : 'dialog-btn primary'}
-            onClick={onConfirm}
-          >
-            {confirmLabel}
-          </button>
+          <div class="dialog-actions">
+            <button class="dialog-btn" onClick={() => props.onCancel()}>
+              {props.cancelLabel ?? '取消'}
+            </button>
+            <button
+              ref={confirmRef}
+              class={["dialog-btn", "primary", { danger: props.danger }]}
+              onClick={() => props.onConfirm()}
+            >
+              {props.confirmLabel}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Show>
   )
 }

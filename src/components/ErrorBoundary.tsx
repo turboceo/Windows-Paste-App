@@ -1,70 +1,71 @@
-import React from 'react'
+import { createSignal } from 'solid-js'
+import type { JSX } from '@solidjs/web'
 import { reportFrontendError } from '../bridge'
 
-interface ErrorBoundaryState {
-  error: Error | null
+interface ErrorBoundaryProps {
+  children: JSX.Element
 }
 
 /**
- * 渲染错误的最后一道防线。
+ * 渲染错误的兜底界面。
  *
- * 没有它的时候，任何一个组件在渲染中抛错，React 都会卸载整棵树——
- * 用户看到的就是"一块干净底色、什么都没有"的白屏，而且会一直白下去
- * （同一份 DOM 状态反复走到同一条抛错路径）。有了边界，至少能给出
- * 可操作的出口，并把堆栈写进 app.log。
+ * 与 React 不同，Solid 没有"捕获子树后续更新错误"的边界机制：
+ * 细粒度更新里的异常只会让那一处绑定失效，不会卸载整棵树。
+ * 真正需要兜住的是**首次渲染**抛错——那会中断挂载，界面停在半成品。
+ *
+ * 所以这里直接 try/catch 包住子树（Solid 组件就是普通函数调用），
+ * 捕获同步异常后渲染可操作的恢复界面，并把堆栈写进 app.log。
+ * 运行期错误由 `installGlobalErrorHandlers` 负责记录（见 bridge.ts）。
  */
-export default class ErrorBoundary extends React.Component<
-  { children: React.ReactNode },
-  ErrorBoundaryState
-> {
-  state: ErrorBoundaryState = { error: null }
+export default function ErrorBoundary(props: ErrorBoundaryProps) {
+  const [error, setError] = createSignal<{ message: string } | null>(null)
 
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { error }
+  const render = (): JSX.Element => {
+    // 已进入错误态：不再触碰子树，避免反复抛错
+    const current = error()
+    if (current) {
+      return <CrashScreen message={current.message} onReset={() => setError(null)} />
+    }
+
+    try {
+      return props.children
+    } catch (err) {
+      const e = err as Error
+      const message = e?.message ?? String(err)
+      reportFrontendError(message, e?.stack, 'solid-render')
+      return <CrashScreen message={message} onReset={() => setError(null)} />
+    }
   }
 
-  componentDidCatch(error: Error, info: React.ErrorInfo): void {
-    reportFrontendError(
-      error.message,
-      `${error.stack ?? ''}\n--- componentStack ---\n${info.componentStack ?? ''}`,
-      'react-error-boundary',
-    )
-  }
+  return <>{render()}</>
+}
 
-  render(): React.ReactNode {
-    if (!this.state.error) return this.props.children
-
-    return (
-      <div className="crash-screen">
-        <div className="crash-box">
-          <div className="crash-glyph">&#xE7BA;</div>
-          <h2 className="crash-title">界面渲染出错了</h2>
-          <p className="crash-desc">
-            这一屏已经无法继续显示。你的剪贴板历史没有受影响，可以重新加载界面。
-          </p>
-          <pre className="crash-detail">{this.state.error.message}</pre>
-          <div className="crash-actions">
-            <button
-              className="dialog-btn primary"
-              onClick={() => {
-                // 重载整个 WebView，等价于重开面板，但不用重启进程
-                location.reload()
-              }}
-            >
-              重新加载界面
-            </button>
-            <button
-              className="dialog-btn"
-              onClick={() => {
-                this.setState({ error: null })
-              }}
-            >
-              再试一次
-            </button>
-          </div>
-          <p className="crash-hint">错误详情已写入 app.log，可在设置里打开存储目录查看。</p>
+function CrashScreen(props: { message: string; onReset: () => void }) {
+  return (
+    <div class="crash-screen">
+      <div class="crash-box">
+        <div class="crash-glyph">&#xE7BA;</div>
+        <h2 class="crash-title">界面渲染出错了</h2>
+        <p class="crash-desc">
+          这一屏已经无法继续显示。你的剪贴板历史没有受影响，可以重新加载界面。
+        </p>
+        <pre class="crash-detail">{props.message}</pre>
+        <div class="crash-actions">
+          <button
+            class="dialog-btn primary"
+            onClick={() => {
+              // 重载整个 WebView，等价于重开面板，但不用重启进程
+              location.reload()
+            }}
+          >
+            重新加载界面
+          </button>
+          <button class="dialog-btn" onClick={() => props.onReset()}>
+            再试一次
+          </button>
         </div>
+        <p class="crash-hint">错误详情已写入 app.log，可在设置里打开存储目录查看。</p>
       </div>
-    )
-  }
+    </div>
+  )
 }

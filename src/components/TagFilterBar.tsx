@@ -1,12 +1,14 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { For, Show, createEffect, createSignal } from 'solid-js'
 import { TAG_COLOR_PALETTE, getTagColor } from '../tagColors'
+import { mount } from '../solid-utils'
 
 interface TagFilterBarProps {
-  allTags: string[]
-  activeTag: string | null
-  tagColors: Record<string, string>
+  allTags: () => string[]
+  activeTag: () => string | null
+  tagColors: () => Record<string, string>
   onFilterTag: (tag: string | null) => void
   onSaveTagColor: (tag: string, color: string) => void
+  /** 触发"删除分类"确认流程（确认框由 App 管理） */
   onDeleteTag: (tag: string) => void
 }
 
@@ -20,208 +22,206 @@ interface TagMenuState {
  * YouTube 风格的 feed-filter-chip-bar：
  * - 横向平滑滚动，带左右渐变遮罩与导航箭头；
  * - 鼠标滚轮直接在胶囊栏上横向平移；
- * - 右键任意标签胶囊弹出管理菜单，可随时修改分类颜色或删除分类。
+ * - 右键任意胶囊弹出管理浮层，可随时改色或删除分类。
  */
-export default function TagFilterBar({
-  allTags,
-  activeTag,
-  tagColors,
-  onFilterTag,
-  onSaveTagColor,
-  onDeleteTag,
-}: TagFilterBarProps) {
-  const scrollRef = useRef<HTMLDivElement | null>(null)
-  const [canScrollLeft, setCanScrollLeft] = useState(false)
-  const [canScrollRight, setCanScrollRight] = useState(false)
-  const [menu, setMenu] = useState<TagMenuState | null>(null)
-  const menuRef = useRef<HTMLDivElement | null>(null)
+export default function TagFilterBar(props: TagFilterBarProps) {
+  let scrollEl: HTMLDivElement | undefined
+  const [canScrollLeft, setCanScrollLeft] = createSignal(false)
+  const [canScrollRight, setCanScrollRight] = createSignal(false)
+  const [menu, setMenu] = createSignal<TagMenuState | null>(null)
 
-  const checkScroll = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
-    const { scrollLeft, scrollWidth, clientWidth } = el
+  let popoverEl: HTMLDivElement | undefined
+
+  const checkScroll = () => {
+    if (!scrollEl) return
+    const { scrollLeft, scrollWidth, clientWidth } = scrollEl
     setCanScrollLeft(scrollLeft > 3)
     setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 3)
-  }, [])
+  }
 
-  useEffect(() => {
+  mount(() => {
     checkScroll()
-    const el = scrollRef.current
-    if (!el) return
-
+    if (!scrollEl) return
     const observer = new ResizeObserver(() => checkScroll())
-    observer.observe(el)
+    observer.observe(scrollEl)
     return () => observer.disconnect()
-  }, [allTags, checkScroll])
+  })
+
+  // 标签数量变化后内容宽度会变，滚动按钮的可用性要重算
+  createEffect(
+    () => props.allTags().length,
+    () => checkScroll(),
+  )
 
   const scrollBy = (offset: number) => {
-    if (!scrollRef.current) return
-    scrollRef.current.scrollBy({ left: offset, behavior: 'smooth' })
+    scrollEl?.scrollBy({ left: offset, behavior: 'smooth' })
   }
 
-  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
-    if (!scrollRef.current) return
-    if (e.deltaY !== 0) {
-      scrollRef.current.scrollLeft += e.deltaY * 0.9
-      checkScroll()
-    }
+  // 浮层的视口边界保护：同 ContextMenu 的思路，挂载时量一次、
+  // 直接写 style，不经过响应式更新。
+  const positionPopover = (el: HTMLDivElement) => {
+    popoverEl = el
+    const state = menu()
+    if (!state) return
+    const gap = 10
+    const rect = el.getBoundingClientRect()
+    const x = Math.max(gap, Math.min(state.x, window.innerWidth - rect.width - gap))
+    const y = Math.max(gap, Math.min(state.y, window.innerHeight - rect.height - gap))
+    el.style.left = `${x}px`
+    el.style.top = `${y}px`
   }
 
-  // 点击外部或 Esc 关闭标签管理浮层
-  useEffect(() => {
-    if (!menu) return
-    const handleDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenu(null)
+  // 点击外部或按 Esc 关闭浮层。监听在 window 上，捕获点击目标是浮层外的地方。
+  createEffect(
+    () => menu(),
+    (state) => {
+      if (!state) return
+      const onDown = (event: MouseEvent) => {
+        if (popoverEl && !popoverEl.contains(event.target as Node)) {
+          setMenu(null)
+        }
       }
-    }
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setMenu(null)
+      const onKey = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') setMenu(null)
       }
-    }
-    window.addEventListener('mousedown', handleDown)
-    window.addEventListener('keydown', handleKey)
-    return () => {
-      window.removeEventListener('mousedown', handleDown)
-      window.removeEventListener('keydown', handleKey)
-    }
-  }, [menu])
+      window.addEventListener('mousedown', onDown)
+      window.addEventListener('keydown', onKey)
+      return () => {
+        window.removeEventListener('mousedown', onDown)
+        window.removeEventListener('keydown', onKey)
+      }
+    },
+  )
 
-  const handleChipContextMenu = (e: React.MouseEvent, tag: string) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const menuWidth = 200
-    const menuHeight = 150
-    const x = Math.min(e.clientX, window.innerWidth - menuWidth - 10)
-    const y = Math.min(e.clientY, window.innerHeight - menuHeight - 10)
-    setMenu({ tag, x, y })
+  const openMenuFor = (tag: string, event: MouseEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    // 重新打开时先归零坐标让 ref 回调重跑：keyed 渲染（Show + 新对象）
+    // 每次都产生全新节点，所以 positionPopover 必然重新执行
+    setMenu({ tag, x: event.clientX, y: event.clientY })
   }
 
   return (
-    <div className="feed-filter-bar-wrapper">
-      {/* 左侧平滑滚动按钮与渐变边缘遮罩 */}
-      {canScrollLeft && (
-        <div className="chip-nav-wrapper left">
+    <div class="feed-filter-bar-wrapper">
+      <Show when={canScrollLeft()}>
+        <div class="chip-nav-wrapper left">
           <button
-            className="chip-nav-btn"
+            class="chip-nav-btn"
             title="向左滚动"
-            onClick={() => scrollBy(-200)}
             aria-label="向左滚动标签"
+            onClick={() => scrollBy(-200)}
           >
             &#xE76B;
           </button>
         </div>
-      )}
+      </Show>
 
-      {/* 滚动条隐藏的核心容器 */}
       <div
-        ref={scrollRef}
-        className="feed-filter-chip-bar"
+        ref={scrollEl}
+        class="feed-filter-chip-bar"
         onScroll={checkScroll}
-        onWheel={handleWheel}
+        onWheel={(event) => {
+          if (!scrollEl || event.deltaY === 0) return
+          scrollEl.scrollLeft += event.deltaY * 0.9
+          checkScroll()
+        }}
       >
         <button
-          className={`tag-filter-pill${activeTag === null ? ' active' : ''}`}
-          onClick={() => onFilterTag(null)}
+          class={["tag-filter-pill", { active: props.activeTag() === null }]}
+          onClick={() => props.onFilterTag(null)}
         >
           全部
         </button>
 
-        {allTags.map((tag) => {
-          const isActive = activeTag === tag
-          const color = getTagColor(tag, tagColors)
-          return (
-            <button
-              key={tag}
-              className={`tag-filter-pill${isActive ? ' active' : ''}`}
-              style={
-                isActive
-                  ? { backgroundColor: color, borderColor: color }
-                  : undefined
-              }
-              title={`${tag} · 右键可修改颜色或删除`}
-              onClick={() => onFilterTag(isActive ? null : tag)}
-              onContextMenu={(e) => handleChipContextMenu(e, tag)}
-            >
-              <span
-                className="tag-dot"
-                style={{
-                  backgroundColor: isActive ? '#ffffff' : color,
-                }}
-              />
-              <span className="tag-name">{tag}</span>
-            </button>
-          )
-        })}
+        <For each={props.allTags()}>
+          {(tag) => {
+            const color = () => getTagColor(tag, props.tagColors())
+            const active = () => props.activeTag() === tag
+            return (
+              <button
+                class={["tag-filter-pill", { active: active() }]}
+                style={active() ? { 'background-color': color(), 'border-color': color() } : undefined}
+                title={`${tag} · 右键可修改颜色或删除`}
+                onClick={() => props.onFilterTag(active() ? null : tag)}
+                onContextMenu={(event) => openMenuFor(tag, event)}
+              >
+                <span
+                  class="tag-dot"
+                  style={{ 'background-color': active() ? '#ffffff' : color() }}
+                />
+                <span class="tag-name">{tag}</span>
+              </button>
+            )
+          }}
+        </For>
       </div>
 
-      {/* 右侧平滑滚动按钮与渐变边缘遮罩 */}
-      {canScrollRight && (
-        <div className="chip-nav-wrapper right">
+      <Show when={canScrollRight()}>
+        <div class="chip-nav-wrapper right">
           <button
-            className="chip-nav-btn"
+            class="chip-nav-btn"
             title="向右滚动"
-            onClick={() => scrollBy(200)}
             aria-label="向右滚动标签"
+            onClick={() => scrollBy(200)}
           >
             &#xE76C;
           </button>
         </div>
-      )}
+      </Show>
 
-      {/* 标签右键菜单：可重选颜色、或删除该分类 */}
-      {menu && (
-        <div
-          ref={menuRef}
-          className="tag-chip-popover"
-          style={{ left: `${menu.x}px`, top: `${menu.y}px` }}
-          onContextMenu={(e) => e.preventDefault()}
-        >
-          <div className="popover-header">
-            <span
-              className="tag-dot"
-              style={{ backgroundColor: getTagColor(menu.tag, tagColors) }}
-            />
-            <span className="popover-title">{menu.tag}</span>
-          </div>
-
-          <div className="popover-section-label">更改颜色：</div>
-          <div className="color-palette-grid">
-            {TAG_COLOR_PALETTE.map((color) => {
-              const isSelected = getTagColor(menu.tag, tagColors) === color
-              return (
-                <button
-                  key={color}
-                  type="button"
-                  className={`palette-color-btn${isSelected ? ' active' : ''}`}
-                  style={{ backgroundColor: color }}
-                  title={color}
-                  onClick={() => {
-                    onSaveTagColor(menu.tag, color)
-                    // 修改后保持浮层，让用户看到选中的效果反馈
-                  }}
-                />
-              )
-            })}
-          </div>
-
-          <div className="popover-divider" />
-
-          <button
-            type="button"
-            className="popover-delete-btn"
-            onClick={() => {
-              const targetTag = menu.tag
-              setMenu(null)
-              onDeleteTag(targetTag)
-            }}
+      {/* 标签管理浮层：换色、删除 */}
+      <Show when={menu()} keyed>
+        {(state) => (
+          <div
+            ref={positionPopover}
+            class="tag-chip-popover"
+            style={{ left: `${state.x}px`, top: `${state.y}px` }}
+            onContextMenu={(event) => event.preventDefault()}
           >
-            <span className="del-glyph">&#xE74D;</span>
-            删除该分类
-          </button>
-        </div>
-      )}
+            <div class="popover-header">
+              <span
+                class="tag-dot"
+                style={{ 'background-color': getTagColor(state.tag, props.tagColors()) }}
+              />
+              <span class="popover-title">{state.tag}</span>
+            </div>
+
+            <div class="popover-section-label">更改颜色：</div>
+            <div class="color-palette-grid">
+              <For each={TAG_COLOR_PALETTE}>
+                {(color) => (
+                  <button
+                    type="button"
+                    class={[
+                      'palette-color-btn',
+                      { active: getTagColor(state.tag, props.tagColors()) === color },
+                    ]}
+                    style={{ 'background-color': color }}
+                    title={color}
+                    // 换色后保持浮层打开，让用户看到实时生效的效果
+                    onClick={() => props.onSaveTagColor(state.tag, color)}
+                  />
+                )}
+              </For>
+            </div>
+
+            <div class="popover-divider" />
+
+            <button
+              type="button"
+              class="popover-delete-btn"
+              onClick={() => {
+                const target = state.tag
+                setMenu(null)
+                props.onDeleteTag(target)
+              }}
+            >
+              <span class="del-glyph">&#xE74D;</span>
+              删除该分类
+            </button>
+          </div>
+        )}
+      </Show>
     </div>
   )
 }

@@ -1,9 +1,9 @@
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import solid from '@solidjs/vite-plugin'
 
 // Tauri standard config: serve frontendDist as root origin.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [solid()],
   clearScreen: false,
   build: {
     outDir: 'dist',

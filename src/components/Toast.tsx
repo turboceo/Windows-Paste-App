@@ -1,10 +1,12 @@
+import { Show } from 'solid-js'
+
 export interface ToastState {
   visible: boolean
   message: string
 }
 
 interface ToastProps {
-  toast: ToastState
+  toast: () => ToastState
 }
 
 /**
@@ -13,12 +15,14 @@ interface ToastProps {
  * 存在的意义是替换掉"静默失败"：导出成功、导入失败、热键被占用
  * 这类结果必须有个可见的回执，否则用户只会觉得软件坏了。
  */
-export default function Toast({ toast }: ToastProps) {
-  if (!toast.visible || !toast.message) return null
-
+export default function Toast(props: ToastProps) {
   return (
-    <div className="toast" role="status" aria-live="polite">
-      {toast.message}
-    </div>
+    <Show when={props.toast().visible && props.toast().message}>
+      {(message) => (
+        <div class="toast" role="status" aria-live="polite">
+          {message()}
+        </div>
+      )}
+    </Show>
   )
 }

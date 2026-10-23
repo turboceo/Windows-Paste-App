@@ -1,119 +1,109 @@
-import { useEffect } from 'react'
+import { Show } from 'solid-js'
 
 interface SettingsDialogProps {
   open: boolean
-  version: string
-  dataRoot: string
-  blobsRoot: string
+  version: () => string
+  dataRoot: () => string
+  blobsRoot: () => string
   onClose: () => void
   onOpenDataDir: () => void
 }
 
-export default function SettingsDialog({
-  open,
-  version,
-  dataRoot,
-  blobsRoot,
-  onClose,
-  onOpenDataDir,
-}: SettingsDialogProps) {
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (!open) return
-      if (e.key === 'Escape') {
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [open, onClose])
-
-  if (!open) return null
-
+/**
+ * 设置与关于弹窗：版本、存储目录、常用快捷键。
+ *
+ * 路径只做展示，真正的打开动作交给后端（`openDataDir`），
+ * 因为 WebView 里拿不到可靠的本地路径操作能力。
+ */
+export default function SettingsDialog(props: SettingsDialogProps) {
   return (
-    <div className="dialog-backdrop" onClick={onClose}>
-      <div className="dialog settings-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="settings-header">
-          <div className="settings-brand">
-            <span className="settings-logo">&#xE8A5;</span>
-            <div className="settings-titles">
-              <h3 className="settings-app-name">Windows Paste</h3>
-              <span className="settings-version-tag">v{version || '0.2.0'}</span>
+    <Show when={props.open}>
+      <div class="dialog-backdrop" onClick={() => props.onClose()}>
+        <div class="dialog settings-dialog" onClick={(event) => event.stopPropagation()}>
+          <div class="settings-header">
+            <div class="settings-brand">
+              <span class="settings-logo">&#xE8A5;</span>
+              <div class="settings-titles">
+                <h3 class="settings-app-name">Windows Paste</h3>
+                <span class="settings-version-tag">v{props.version() || '0.2.0'}</span>
+              </div>
             </div>
-          </div>
-          <button className="settings-close-btn" onClick={onClose} title="关闭 (Esc)">
-            &#xE711;
-          </button>
-        </div>
-
-        <div className="settings-body">
-          {/* 数据与缓存存储路径 */}
-          <div className="settings-section">
-            <div className="section-header">
-              <span className="section-title">本地存储目录</span>
-              <button
-                type="button"
-                className="open-dir-btn"
-                onClick={onOpenDataDir}
-                title="在 Windows 文件资源管理器中定位"
-              >
-                <span className="btn-icon">&#xE838;</span>
-                打开存储目录
-              </button>
-            </div>
-            <div className="path-box" title={dataRoot || '默认数据目录'}>
-              <span className="path-label">数据主目录:</span>
-              <span className="path-val">{dataRoot || '%LOCALAPPDATA%\\WindowsPaste'}</span>
-            </div>
-            <div className="path-box" title={blobsRoot || '图片缓存目录'}>
-              <span className="path-label">图片文件库:</span>
-              <span className="path-val">{blobsRoot || '%LOCALAPPDATA%\\WindowsPaste\\blobs'}</span>
-            </div>
+            <button class="settings-close-btn" onClick={() => props.onClose()} title="关闭 (Esc)">
+              &#xE711;
+            </button>
           </div>
 
-          {/* 常用快捷键速查 */}
-          <div className="settings-section">
-            <div className="section-title">快捷键速查</div>
-            <div className="shortcut-list">
-              <div className="shortcut-row">
-                <span className="sc-desc">唤起 / 隐藏历史面板</span>
-                <span className="sc-keys">
-                  <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>V</kbd>
+          <div class="settings-body">
+            <div class="settings-section">
+              <div class="section-header">
+                <span class="section-title">本地存储目录</span>
+                <button
+                  type="button"
+                  class="open-dir-btn"
+                  onClick={() => props.onOpenDataDir()}
+                  title="在 Windows 文件资源管理器中定位"
+                >
+                  <span class="btn-icon">&#xE838;</span>
+                  打开存储目录
+                </button>
+              </div>
+              <div class="path-box" title={props.dataRoot() || '默认数据目录'}>
+                <span class="path-label">数据主目录:</span>
+                <span class="path-val">
+                  {props.dataRoot() || '%LOCALAPPDATA%\\WindowsPaste'}
                 </span>
               </div>
-              <div className="shortcut-row">
-                <span className="sc-desc">复制内容至剪贴板</span>
-                <span className="sc-keys">双击卡片</span>
-              </div>
-              <div className="shortcut-row">
-                <span className="sc-desc">直接回贴至前台程序</span>
-                <span className="sc-keys">
-                  <kbd>Enter</kbd> 或 右键粘贴
-                </span>
-              </div>
-              <div className="shortcut-row">
-                <span className="sc-desc">置顶 / 取消置顶</span>
-                <span className="sc-keys">
-                  <kbd>Ctrl</kbd> + <kbd>P</kbd>
-                </span>
-              </div>
-              <div className="shortcut-row">
-                <span className="sc-desc">删除选中的卡片</span>
-                <span className="sc-keys">
-                  <kbd>Del</kbd>
+              <div class="path-box" title={props.blobsRoot() || '图片缓存目录'}>
+                <span class="path-label">图片文件库:</span>
+                <span class="path-val">
+                  {props.blobsRoot() || '%LOCALAPPDATA%\\WindowsPaste\\blobs'}
                 </span>
               </div>
             </div>
-          </div>
-        </div>
 
-        <div className="settings-footer">
-          <span className="settings-tip">剪贴板历史与图片全部保存在本地，绝不上云</span>
-          <button className="dialog-btn primary" onClick={onClose}>
-            完成
-          </button>
+            <div class="settings-section">
+              <div class="section-title">快捷键速查</div>
+              <div class="shortcut-list">
+                <div class="shortcut-row">
+                  <span class="sc-desc">唤起 / 隐藏历史面板</span>
+                  <span class="sc-keys">
+                    <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>V</kbd>
+                  </span>
+                </div>
+                <div class="shortcut-row">
+                  <span class="sc-desc">复制内容至剪贴板</span>
+                  <span class="sc-keys">双击卡片</span>
+                </div>
+                <div class="shortcut-row">
+                  <span class="sc-desc">直接回贴至前台程序</span>
+                  <span class="sc-keys">
+                    <kbd>Enter</kbd> 或 右键粘贴
+                  </span>
+                </div>
+                <div class="shortcut-row">
+                  <span class="sc-desc">置顶 / 取消置顶</span>
+                  <span class="sc-keys">
+                    <kbd>Ctrl</kbd> + <kbd>P</kbd>
+                  </span>
+                </div>
+                <div class="shortcut-row">
+                  <span class="sc-desc">删除选中的卡片</span>
+                  <span class="sc-keys">
+                    <kbd>Del</kbd>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-footer">
+            <span class="settings-tip">剪贴板历史与图片全部保存在本地，绝不上云</span>
+            <button class="dialog-btn primary" onClick={() => props.onClose()}>
+              完成
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Show>
   )
 }
