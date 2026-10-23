@@ -1759,6 +1759,709 @@ body.is-dragging-card .card-slot .paste-card {
 }
 
 /* ==========================================================================
+   Onboarding Guide (新手功能引导动画弹窗)
+   ========================================================================== */
+.guide-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: dialogFade 180ms ease-out;
+}
+
+.guide-modal {
+  position: relative;
+  width: min(540px, 94vw);
+  background: #ffffff;
+  border-radius: 18px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 24px 60px -12px rgba(15, 23, 42, 0.28), 0 4px 16px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.guide-close-btn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 10;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text-dim);
+  font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 120ms ease;
+}
+
+.guide-close-btn:hover {
+  background: rgba(0, 0, 0, 0.12);
+  color: var(--text-main);
+  transform: scale(1.08);
+}
+
+/* 上半部分：动画舞台 */
+.guide-stage-container {
+  height: 220px;
+  background: radial-gradient(circle at 50% 40%, #fbfcfe 0%, #edf2f7 100%);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.stage-scene {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 场景 1: Ctrl+Shift+V 敲击与呼出 */
+.anim-keyboard-keys {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: absolute;
+  top: 32px;
+  z-index: 2;
+}
+
+.key-cap {
+  padding: 6px 14px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.12), 0 4px 10px rgba(0, 0, 0, 0.06);
+  animation: keyPressAnim 2.2s infinite ease-in-out;
+}
+
+.key-cap.key-ctrl { animation-delay: 0.1s; }
+.key-cap.key-shift { animation-delay: 0.3s; }
+.key-cap.key-v {
+  animation-delay: 0.5s;
+  background: #ea8a1f;
+  color: #ffffff;
+  border-color: #ea8a1f;
+  box-shadow: 0 4px 0 #c27010, 0 4px 10px rgba(234, 138, 31, 0.3);
+}
+
+.key-plus {
+  font-weight: 700;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+@keyframes keyPressAnim {
+  0%, 100% {
+    transform: translateY(0);
+    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.12), 0 4px 10px rgba(0, 0, 0, 0.06);
+  }
+  30%, 45% {
+    transform: translateY(3px);
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.06);
+  }
+}
+
+.anim-paste-panel {
+  position: absolute;
+  bottom: -10px;
+  width: 280px;
+  background: #ffffff;
+  border-radius: 12px 12px 0 0;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.12);
+  padding: 8px 12px 14px;
+  z-index: 3;
+  animation: panelSlideUp 2.2s infinite cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes panelSlideUp {
+  0%, 35% {
+    transform: translateY(110%);
+    opacity: 0;
+  }
+  50%, 90% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  98%, 100% {
+    transform: translateY(110%);
+    opacity: 0;
+  }
+}
+
+.panel-mock-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.panel-brand-icon {
+  font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
+  color: #ea8a1f;
+}
+
+.panel-mock-cards {
+  display: flex;
+  gap: 8px;
+}
+
+.mock-mini-card {
+  flex: 1;
+  height: 52px;
+  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.mock-mini-card.active {
+  border-color: #007aff;
+  box-shadow: 0 0 0 2px #007aff;
+}
+
+/* 场景 2: 删除卡片 */
+.anim-card-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  position: relative;
+}
+
+.anim-demo-card {
+  width: 90px;
+  height: 120px;
+  background: #ffffff;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.demo-card-head {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 6px;
+}
+
+.demo-card-head.blue { background: #3e63dd; }
+.demo-card-head.orange { background: #ea8a1f; }
+.demo-card-head.green { background: #46a758; }
+
+.trash-icon-anim {
+  font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
+  color: #ffffff;
+  font-size: 10px;
+}
+
+.demo-card-body {
+  padding: 8px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.mock-line {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.08);
+}
+.mock-line.w80 { width: 80%; }
+.mock-line.w70 { width: 70%; }
+.mock-line.w60 { width: 60%; }
+.mock-line.w50 { width: 50%; }
+.mock-line.w40 { width: 40%; }
+.mock-line.w90 { width: 90%; }
+
+.anim-demo-card.target-delete {
+  animation: cardDelFade 2.6s infinite ease-in-out;
+}
+
+@keyframes cardDelFade {
+  0%, 20% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  38%, 45% {
+    box-shadow: 0 0 0 2px #dc2626;
+  }
+  50%, 78% {
+    opacity: 0;
+    transform: scale(0.6) translateY(18px);
+  }
+  90%, 100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.anim-demo-card.normal.right {
+  animation: cardSlotShift 2.6s infinite ease-in-out;
+}
+
+@keyframes cardSlotShift {
+  0%, 48% {
+    transform: translateX(0);
+  }
+  58%, 78% {
+    transform: translateX(-104px);
+  }
+  90%, 100% {
+    transform: translateX(0);
+  }
+}
+
+.del-tip-bubble {
+  position: absolute;
+  bottom: 12px;
+  background: rgba(15, 23, 42, 0.85);
+  color: #ffffff;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.del-tip-bubble b {
+  color: #fca5a5;
+}
+
+/* 场景 3: 添加标签与颜色 */
+.stage-add-tag {
+  gap: 20px;
+}
+
+.anim-demo-card.with-context-menu {
+  width: 100px;
+  height: 130px;
+}
+
+.anim-tag-pill-popup {
+  position: absolute;
+  bottom: 8px;
+  left: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(70, 167, 88, 0.15);
+  color: #46a758;
+  font-size: 9px;
+  font-weight: 600;
+  animation: tagPopupAnim 2.4s infinite cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.anim-pill-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #46a758;
+}
+
+@keyframes tagPopupAnim {
+  0%, 55% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  65%, 90% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.anim-context-menu-pop {
+  width: 140px;
+  background: #ffffff;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  padding: 4px;
+  font-size: 11px;
+  animation: menuFloat 2.4s infinite ease-in-out;
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  color: var(--text-main);
+}
+
+.ctx-item.active-submenu {
+  background: #ea8a1f;
+  color: #ffffff;
+}
+
+.ctx-icon {
+  font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
+  font-size: 10px;
+}
+
+.ctx-arrow {
+  margin-left: auto;
+  font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
+  font-size: 8px;
+}
+
+.ctx-sub-palette {
+  margin-top: 4px;
+  padding: 5px;
+  background: #f8fafc;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.sub-input-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  background: #ffffff;
+  padding: 2px 4px;
+  border-radius: 4px;
+  border: 1px solid #46a758;
+}
+
+.palette-preview-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #46a758;
+}
+
+.sub-palette-colors {
+  display: flex;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.pal-c {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.pal-c.c-orange { background: #ea8a1f; }
+.pal-c.c-green { background: #46a758; }
+.pal-c.c-blue { background: #0090ff; }
+.pal-c.c-purple { background: #8e4ec6; }
+.pal-c.c-red { background: #e5484d; }
+.pal-c.active {
+  box-shadow: 0 0 0 1.5px #ffffff, 0 0 0 2.5px #46a758;
+}
+
+/* 场景 4: 标签栏管理 */
+.stage-manage-tag {
+  flex-direction: column;
+  gap: 16px;
+}
+
+.anim-chip-bar-container {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.anim-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  color: var(--text-main);
+}
+
+.anim-chip.all {
+  color: var(--text-muted);
+}
+
+.anim-chip.active {
+  background: #46a758;
+  color: #ffffff;
+  border-color: #46a758;
+}
+
+.chip-dot-green {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.chip-dot-orange {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #ea8a1f;
+}
+
+.anim-chip-manage-popover {
+  width: 160px;
+  background: #ffffff;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+  padding: 8px 10px;
+  font-size: 11px;
+  animation: popoverPulse 2.4s infinite ease-in-out;
+}
+
+.pop-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 6px;
+}
+
+.pop-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #46a758;
+}
+
+.pop-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.pop-colors {
+  display: flex;
+  gap: 4px;
+}
+
+.p-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.p-dot.c-green { background: #46a758; }
+.p-dot.c-blue { background: #0090ff; }
+.p-dot.c-orange { background: #ea8a1f; }
+.p-dot.c-purple { background: #8e4ec6; }
+.p-dot.c-pink { background: #d6409f; }
+.p-dot.pick-anim {
+  animation: pickDot 2.4s infinite ease-in-out;
+}
+
+@keyframes pickDot {
+  0%, 40% {
+    transform: scale(1);
+    box-shadow: none;
+  }
+  50%, 80% {
+    transform: scale(1.3);
+    box-shadow: 0 0 0 1.5px #ffffff, 0 0 0 2.5px #0090ff;
+  }
+  90%, 100% {
+    transform: scale(1);
+  }
+}
+
+.pop-line {
+  height: 1px;
+  background: rgba(0, 0, 0, 0.08);
+  margin: 6px -10px 4px;
+}
+
+.pop-del-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #dc2626;
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 2px 0;
+}
+
+.del-icon {
+  font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
+  font-size: 10px;
+}
+
+.tag-mgmt-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* 下半部分：文本与控制 */
+.guide-content {
+  padding: 20px 24px 22px;
+}
+
+.guide-badge-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.guide-step-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(234, 138, 31, 0.12);
+  color: #ea8a1f;
+}
+
+.guide-step-counter {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.guide-title {
+  margin: 0 0 4px;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: -0.2px;
+}
+
+.guide-subtitle {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ea8a1f;
+}
+
+.guide-detail {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  min-height: 40px;
+}
+
+.guide-footer {
+  margin-top: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.guide-dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.guide-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  padding: 0;
+  transition: all 180ms ease;
+}
+
+.guide-dot.active {
+  width: 22px;
+  background: #ea8a1f;
+}
+
+.guide-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.guide-btn {
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 140ms ease;
+  outline: none;
+}
+
+.guide-btn.secondary {
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: #ffffff;
+  color: var(--text-main);
+}
+
+.guide-btn.secondary:hover {
+  background: #f8fafc;
+  border-color: rgba(0, 0, 0, 0.16);
+}
+
+.guide-btn.primary {
+  border: 0;
+  background: #ea8a1f;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(234, 138, 31, 0.28);
+}
+
+.guide-btn.primary:hover {
+  background: #d07612;
+  box-shadow: 0 4px 10px rgba(234, 138, 31, 0.35);
+  transform: translateY(-1px);
+}
+
+.guide-btn.primary:active {
+  transform: translateY(0);
+}
+
+.guide-btn.primary.finish {
+  background: #2563eb;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.28);
+}
+
+.guide-btn.primary.finish:hover {
+  background: #1d4ed8;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.35);
+}
+
+/* ==========================================================================
    响应式
    ========================================================================== */
 /* 窄窗口下先牺牲快捷键提示，保住搜索框和三个操作按钮 */
@@ -2043,5 +2746,35 @@ body.is-dragging-card .card-slot .paste-card {
 
   .hotkey-warning-close:hover {
     background: rgba(240, 178, 60, 0.16);
+  }
+
+  .guide-modal {
+    background: #241d16;
+    border-color: rgba(255, 214, 170, 0.14);
+    box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.8);
+  }
+
+  .guide-stage-container {
+    background: radial-gradient(circle at 50% 40%, #2f271e 0%, #1e1710 100%);
+    border-bottom-color: rgba(255, 214, 170, 0.1);
+  }
+
+  .guide-title {
+    color: #f2e7d8;
+  }
+
+  .guide-step-tag {
+    background: rgba(224, 163, 60, 0.18);
+    color: #f0c681;
+  }
+
+  .guide-btn.secondary {
+    background: rgba(255, 214, 170, 0.08);
+    border-color: rgba(255, 214, 170, 0.14);
+    color: #e8dccc;
+  }
+
+  .guide-btn.secondary:hover {
+    background: rgba(255, 214, 170, 0.15);
   }
 }

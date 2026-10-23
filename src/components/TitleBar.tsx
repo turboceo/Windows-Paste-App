@@ -4,10 +4,16 @@ interface TitleBarProps {
   isMaximized: boolean
   totalCount: number
   filteredCount: number
+  onOpenGuide?: () => void
 }
 
-/** Frameless-window title bar with the app brand, count badge and controls. */
-export default function TitleBar({ isMaximized, totalCount, filteredCount }: TitleBarProps) {
+/** Frameless-window title bar with the app brand, count badge, help guide and controls. */
+export default function TitleBar({
+  isMaximized,
+  totalCount,
+  filteredCount,
+  onOpenGuide,
+}: TitleBarProps) {
   const isFiltering = filteredCount !== totalCount
 
   const badgeText =
@@ -42,6 +48,17 @@ export default function TitleBar({ isMaximized, totalCount, filteredCount }: Tit
       <div className="drag-region" />
 
       <div className="window-controls">
+        <button
+          className="window-control-btn help-btn"
+          title="使用指南与快捷键"
+          onClick={(event) => {
+            event.stopPropagation()
+            onOpenGuide?.()
+          }}
+        >
+          &#xE897;
+        </button>
+
         <button
           className="window-control-btn"
           title="最小化"

@@ -6,6 +6,7 @@ import ToolBar from './components/ToolBar'
 import ContextMenu, { type ContextMenuState } from './components/ContextMenu'
 import ConfirmDialog from './components/ConfirmDialog'
 import Toast, { type ToastState } from './components/Toast'
+import OnboardingGuide from './components/OnboardingGuide'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { isHosted, onPush, send } from './bridge'
 import type { ClipboardItem, HostPush, ImportPreview } from './types'
@@ -54,6 +55,22 @@ export default function App() {
   const [pendingClear, setPendingClear] = useState(false)
   /** 待删除的分类标签；非空时弹出确认框 */
   const [pendingTagDelete, setPendingTagDelete] = useState<string | null>(null)
+
+  // 新手引导弹窗状态：初次启动自动展示，也可通过标题栏随时打开
+  const [showGuide, setShowGuide] = useState(() => {
+    try {
+      return !localStorage.getItem('wp_guide_seen')
+    } catch {
+      return false
+    }
+  })
+
+  const onCloseGuide = useCallback(() => {
+    setShowGuide(false)
+    try {
+      localStorage.setItem('wp_guide_seen', 'true')
+    } catch {}
+  }, [])
 
   // 右键上下文菜单状态
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
@@ -369,14 +386,18 @@ export default function App() {
         return
       }
 
-      // 导入 / 清空对话框都是模态的：只让 Esc 生效，其余按键（尤其是 Enter）
+      // 导入 / 清空对话框与新手引导都是模态的：只让 Esc 生效，其余按键（尤其是 Enter）
       // 不应该穿透到下面的卡片上。
-      if ((pendingImport || pendingClear || pendingTagDelete) && event.key !== 'Escape') {
+      if ((pendingImport || pendingClear || pendingTagDelete || showGuide) && event.key !== 'Escape') {
         return
       }
 
       switch (event.key) {
         case 'Escape':
+          if (showGuide) {
+            onCloseGuide()
+            return
+          }
           if (pendingTagDelete) {
             setPendingTagDelete(null)
             return
@@ -455,6 +476,8 @@ export default function App() {
     pendingImport,
     pendingClear,
     pendingTagDelete,
+    showGuide,
+    onCloseGuide,
   ])
 
   return (
@@ -465,6 +488,7 @@ export default function App() {
           isMaximized={isMaximized}
           totalCount={totalCount}
           filteredCount={items.length}
+          onOpenGuide={() => setShowGuide(true)}
         />
 
         {/* 热键不可用时的常驻提示：这个失败必须让人看见 */}
@@ -615,6 +639,12 @@ export default function App() {
 
         {/* 9. 轻量 toast，替代静默失败 */}
         <Toast toast={toast} />
+
+        {/* 10. 新手功能引导与核心操作动画演示 */}
+        <OnboardingGuide
+          open={showGuide}
+          onClose={onCloseGuide}
+        />
       </div>
     </div>
   )
