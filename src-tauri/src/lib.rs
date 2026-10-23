@@ -251,8 +251,6 @@ pub fn run() {
             let tray_show = handle.clone();
             let tray_exit = handle.clone();
             tray::TrayIcon::start(tray::TrayActions {
-                // 版本号从打包配置读，和窗口标题栏以前用的是同一个来源。
-                version: app.package_info().version.to_string(),
                 on_show: move || {
                     let app = tray_show.clone();
                     // 投递到主线程执行窗口操作。失败了要记下来——
