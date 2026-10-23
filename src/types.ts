@@ -52,6 +52,8 @@ export type HostRequest =
   | { type: 'select'; itemId: number }
   | { type: 'move'; delta: number }
   | { type: 'paste'; itemId: number }
+  | { type: 'copy'; itemId: number }
+  | { type: 'openDataDir' }
   | { type: 'delete'; itemId: number }
   | { type: 'togglePin'; itemId: number }
   | { type: 'setTag'; itemId: number; tag: string | null }
@@ -94,7 +96,7 @@ export type HostPush =
       preview?: ImportPreview
       error?: string
     }
-  | { type: 'paths'; blobsRoot: string }
+  | { type: 'paths'; blobsRoot: string; dataRoot?: string; version?: string }
   /** 按需拉取的缩略图回来了；`imageUrl` 为 null 表示这张图取不到。 */
   | { type: 'thumbnail'; itemId: number; imageUrl: string | null }
   /** 面板被唤出：宿主已清空搜索词与分类筛选，前端同步归零。 */

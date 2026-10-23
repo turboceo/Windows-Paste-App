@@ -63,6 +63,7 @@ interface CardGridProps {
   selectedId: number | null
   tagColors?: Record<string, string>
   onSelect: (item: ClipboardItem) => void
+  onDoubleClick?: (item: ClipboardItem) => void
   onPaste: (item: ClipboardItem) => void
   onTogglePin: (item: ClipboardItem) => void
   onRemove: (item: ClipboardItem) => void
@@ -83,6 +84,7 @@ export default function CardGrid({
   selectedId,
   tagColors,
   onSelect,
+  onDoubleClick,
   onPaste,
   onTogglePin,
   onRemove,
@@ -591,6 +593,7 @@ export default function CardGrid({
                     selected={item.id === selectedId}
                     tagColor={tagColors && item.tag ? tagColors[item.tag] : undefined}
                     onSelect={handleSelect}
+                    onDoubleClick={onDoubleClick}
                     onPaste={onPaste}
                     onTogglePin={onTogglePin}
                     onRemove={onRemove}

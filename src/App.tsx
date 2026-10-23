@@ -7,6 +7,7 @@ import ContextMenu, { type ContextMenuState } from './components/ContextMenu'
 import ConfirmDialog from './components/ConfirmDialog'
 import Toast, { type ToastState } from './components/Toast'
 import OnboardingGuide from './components/OnboardingGuide'
+import SettingsDialog from './components/SettingsDialog'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { isHosted, onPush, send } from './bridge'
 import type { ClipboardItem, HostPush, ImportPreview } from './types'
@@ -64,6 +65,12 @@ export default function App() {
       return false
     }
   })
+
+  // 设置弹窗状态与元信息
+  const [showSettings, setShowSettings] = useState(false)
+  const [appVersion, setAppVersion] = useState('0.2.0')
+  const [dataRoot, setDataRoot] = useState('')
+  const [blobsRoot, setBlobsRoot] = useState('')
 
   const onCloseGuide = useCallback(() => {
     setShowGuide(false)
@@ -151,9 +158,16 @@ export default function App() {
           }
           break
         case 'paths':
-          // 缩略图改为按需拉取，前端不再需要 blob 目录路径。
-          // 保留这个分支只是为了兼容旧版宿主。
-          break
+          if (message.version) {
+            setAppVersion(message.version)
+          }
+          if (message.dataRoot) {
+            setDataRoot(message.dataRoot)
+          }
+          if (message.blobsRoot) {
+            setBlobsRoot(message.blobsRoot)
+          }
+          break;
         case 'thumbnail':
           setThumbnails((prev) =>
             prev[message.itemId] === message.imageUrl
@@ -341,6 +355,10 @@ export default function App() {
     send({ type: 'paste', itemId: item.id })
   }, [])
 
+  const onCopy = useCallback((item: ClipboardItem) => {
+    send({ type: 'copy', itemId: item.id })
+  }, [])
+
   const onTogglePin = useCallback((item: ClipboardItem) => {
     send({ type: 'togglePin', itemId: item.id })
   }, [])
@@ -386,14 +404,18 @@ export default function App() {
         return
       }
 
-      // 导入 / 清空对话框与新手引导都是模态的：只让 Esc 生效，其余按键（尤其是 Enter）
+      // 导入 / 清空对话框、新手引导与设置弹窗都是模态的：只让 Esc 生效，其余按键（尤其是 Enter）
       // 不应该穿透到下面的卡片上。
-      if ((pendingImport || pendingClear || pendingTagDelete || showGuide) && event.key !== 'Escape') {
+      if ((pendingImport || pendingClear || pendingTagDelete || showGuide || showSettings) && event.key !== 'Escape') {
         return
       }
 
       switch (event.key) {
         case 'Escape':
+          if (showSettings) {
+            setShowSettings(false)
+            return
+          }
           if (showGuide) {
             onCloseGuide()
             return
@@ -478,6 +500,7 @@ export default function App() {
     pendingTagDelete,
     showGuide,
     onCloseGuide,
+    showSettings,
   ])
 
   return (
@@ -489,6 +512,7 @@ export default function App() {
           totalCount={totalCount}
           filteredCount={items.length}
           onOpenGuide={() => setShowGuide(true)}
+          onOpenSettings={() => setShowSettings(true)}
         />
 
         {/* 热键不可用时的常驻提示：这个失败必须让人看见 */}
@@ -525,6 +549,7 @@ export default function App() {
             selectedId={selectedId}
             tagColors={tagColors}
             onSelect={onSelect}
+            onDoubleClick={onCopy}
             onPaste={onPaste}
             onTogglePin={onTogglePin}
             onRemove={onRemove}
@@ -644,6 +669,16 @@ export default function App() {
         <OnboardingGuide
           open={showGuide}
           onClose={onCloseGuide}
+        />
+
+        {/* 11. 设置与关于弹窗 */}
+        <SettingsDialog
+          open={showSettings}
+          version={appVersion}
+          dataRoot={dataRoot}
+          blobsRoot={blobsRoot}
+          onClose={() => setShowSettings(false)}
+          onOpenDataDir={() => send({ type: 'openDataDir' })}
         />
       </div>
     </div>

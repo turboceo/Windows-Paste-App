@@ -252,6 +252,15 @@ body {
   color: #ffffff;
 }
 
+.window-control-btn.help-btn,
+.window-control-btn.settings-btn {
+  font-size: 11px;
+}
+
+.window-control-btn.settings-btn:hover {
+  color: #ea8a1f;
+}
+
 /* ==========================================================================
    CardGrid Virtual Scrolling Container
    ========================================================================== */
@@ -2462,6 +2471,206 @@ body.is-dragging-card .card-slot .paste-card {
 }
 
 /* ==========================================================================
+   Settings Dialog (设置与关于弹窗)
+   ========================================================================== */
+.dialog.settings-dialog {
+  width: min(480px, 94vw);
+  padding: 20px 22px 18px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.settings-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-logo {
+  font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
+  font-size: 24px;
+  color: #ea8a1f;
+}
+
+.settings-titles {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.settings-app-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: -0.2px;
+}
+
+.settings-version-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(234, 138, 31, 0.12);
+  color: #ea8a1f;
+}
+
+.settings-close-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-dim);
+  font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 120ms ease;
+}
+
+.settings-close-btn:hover {
+  background: rgba(0, 0, 0, 0.1);
+  color: var(--text-main);
+}
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.section-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: -0.1px;
+}
+
+.open-dir-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #ffffff;
+  color: var(--text-main);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.open-dir-btn .btn-icon {
+  font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
+  font-size: 11px;
+  color: #ea8a1f;
+}
+
+.open-dir-btn:hover {
+  background: #f8fafc;
+  border-color: rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+.path-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.path-label {
+  color: var(--text-dim);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.path-val {
+  color: var(--text-muted);
+  font-family: Consolas, Monaco, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcut-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+}
+
+.sc-desc {
+  color: var(--text-muted);
+}
+
+.sc-keys {
+  font-weight: 600;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sc-keys kbd {
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.05);
+  font-size: 10px;
+}
+
+.settings-footer {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-tip {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* ==========================================================================
    响应式
    ========================================================================== */
 /* 窄窗口下先牺牲快捷键提示，保住搜索框和三个操作按钮 */
@@ -2776,5 +2985,43 @@ body.is-dragging-card .card-slot .paste-card {
 
   .guide-btn.secondary:hover {
     background: rgba(255, 214, 170, 0.15);
+  }
+
+  .dialog.settings-dialog {
+    background: #241d16;
+    border-color: rgba(255, 214, 170, 0.14);
+    box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.8);
+  }
+
+  .settings-app-name,
+  .section-title,
+  .sc-keys {
+    color: #f2e7d8;
+  }
+
+  .open-dir-btn {
+    background: rgba(255, 214, 170, 0.08);
+    border-color: rgba(255, 214, 170, 0.16);
+    color: #f2e7d8;
+  }
+
+  .open-dir-btn:hover {
+    background: rgba(255, 214, 170, 0.14);
+  }
+
+  .path-box,
+  .shortcut-list {
+    background: rgba(0, 0, 0, 0.25);
+    border-color: rgba(255, 214, 170, 0.08);
+  }
+
+  .sc-keys kbd {
+    background: rgba(255, 214, 170, 0.1);
+    border-color: rgba(255, 214, 170, 0.16);
+    color: #e4d5c2;
+  }
+
+  .settings-footer {
+    border-top-color: rgba(255, 214, 170, 0.08);
   }
 }

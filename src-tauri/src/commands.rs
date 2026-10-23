@@ -33,6 +33,14 @@ pub enum HostRequest {
         #[serde(alias = "item_id")]
         item_id: i64,
     },
+    /// 仅将内容写入系统剪贴板，不隐藏窗口、不模拟按键
+    #[serde(rename_all = "camelCase")]
+    Copy {
+        #[serde(alias = "item_id")]
+        item_id: i64,
+    },
+    /// 打开数据与文件保存的本地目录
+    OpenDataDir,
     #[serde(rename_all = "camelCase")]
     Delete {
         #[serde(alias = "item_id")]
@@ -157,6 +165,8 @@ pub fn handle(app: &AppHandle, state: &mut AppState, req: HostRequest) {
                 json!({
                     "type": "paths",
                     "blobsRoot": state.paths.blobs.to_string_lossy(),
+                    "dataRoot": state.paths.root.to_string_lossy(),
+                    "version": app.package_info().version.to_string(),
                 }),
             );
         }
@@ -178,6 +188,25 @@ pub fn handle(app: &AppHandle, state: &mut AppState, req: HostRequest) {
         }
         HostRequest::Paste { item_id } => {
             paste_item(app, state, item_id);
+        }
+        HostRequest::Copy { item_id } => {
+            if let Some(item) = state.item_by_id(item_id) {
+                let blobs = state.paths.blobs.clone();
+                crate::paste::PasteService::write_to_clipboard(&item, &blobs);
+                emit_push(
+                    app,
+                    json!({
+                        "type": "toast",
+                        "message": "已复制到剪贴板",
+                    }),
+                );
+            }
+        }
+        HostRequest::OpenDataDir => {
+            let root = state.paths.root.clone();
+            std::thread::spawn(move || {
+                let _ = std::process::Command::new("explorer").arg(&root).spawn();
+            });
         }
         HostRequest::Delete { item_id } => {
             // 删除前先记下它的槽位，以及它是不是当前选中项。

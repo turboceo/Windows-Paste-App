@@ -118,5 +118,11 @@ function seedDevData(handler: (message: HostPush) => void): void {
       selection: { itemId: items[0]?.id ?? null, canPrev: false, canNext: true },
     })
     handler({ type: 'hotkey', label: 'Ctrl + Shift + V' })
+    handler({
+      type: 'paths',
+      blobsRoot: 'C:\\Users\\Pyzl\\AppData\\Local\\WindowsPaste\\blobs',
+      dataRoot: 'C:\\Users\\Pyzl\\AppData\\Local\\WindowsPaste',
+      version: '0.2.0',
+    })
   }, 80)
 }

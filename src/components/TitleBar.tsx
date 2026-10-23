@@ -5,6 +5,7 @@ interface TitleBarProps {
   totalCount: number
   filteredCount: number
   onOpenGuide?: () => void
+  onOpenSettings?: () => void
 }
 
 /** Frameless-window title bar with the app brand, count badge, help guide and controls. */
@@ -13,6 +14,7 @@ export default function TitleBar({
   totalCount,
   filteredCount,
   onOpenGuide,
+  onOpenSettings,
 }: TitleBarProps) {
   const isFiltering = filteredCount !== totalCount
 
@@ -50,13 +52,24 @@ export default function TitleBar({
       <div className="window-controls">
         <button
           className="window-control-btn help-btn"
-          title="使用指南与快捷键"
+          title="使用指南"
           onClick={(event) => {
             event.stopPropagation()
             onOpenGuide?.()
           }}
         >
           &#xE897;
+        </button>
+
+        <button
+          className="window-control-btn settings-btn"
+          title="设置与关于"
+          onClick={(event) => {
+            event.stopPropagation()
+            onOpenSettings?.()
+          }}
+        >
+          &#xE713;
         </button>
 
         <button

@@ -13,6 +13,7 @@ interface ClipCardProps {
   selected: boolean
   tagColor?: string
   onSelect: (item: ClipboardItem) => void
+  onDoubleClick?: (item: ClipboardItem) => void
   onPaste: (item: ClipboardItem) => void
   onTogglePin: (item: ClipboardItem) => void
   onRemove: (item: ClipboardItem) => void
@@ -31,6 +32,7 @@ export default function ClipCard({
   selected,
   tagColor,
   onSelect,
+  onDoubleClick,
   onPaste,
   onTogglePin,
   onRemove,
@@ -155,7 +157,7 @@ export default function ClipCard({
           item.pinned ? ' pinned' : ''
         }`}
         onClick={() => onSelect(item)}
-        onDoubleClick={() => onPaste(item)}
+        onDoubleClick={() => (onDoubleClick ? onDoubleClick(item) : onPaste(item))}
         onContextMenu={(e) => {
           e.preventDefault()
           onContextMenu?.(item, e)
