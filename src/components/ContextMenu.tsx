@@ -150,10 +150,8 @@ export default function ContextMenu(props: ContextMenuProps) {
     },
   )
 
-  /** 挂载时量一次真实尺寸，把菜单摆到不与视口边缘重叠的位置 */
-  const positionMenu = (el: HTMLDivElement) => {
-    menuEl = el
-    const { x, y } = props.menu()
+  /** 按给定坐标摆放菜单：量一次真实尺寸，夹到视口内，避免贴边被裁 */
+  const positionMenuAt = (el: HTMLDivElement, x: number, y: number) => {
     const gap = 8
     const rect = el.getBoundingClientRect()
     const left = Math.max(gap, Math.min(x, window.innerWidth - rect.width - gap))
@@ -162,6 +160,26 @@ export default function ContextMenu(props: ContextMenuProps) {
     el.style.top = `${top}px`
     el.style.visibility = 'visible'
   }
+
+  /** 首次挂载时由 ref 回调摆一次位置 */
+  const positionMenu = (el: HTMLDivElement) => {
+    menuEl = el
+    const { x, y } = props.menu()
+    positionMenuAt(el, x, y)
+  }
+
+  // 菜单已经开着时右键另一张卡片：`visible` 一直是 true，非 keyed 的
+  // <Show> 会复用同一个 DOM 节点，ref 不会再跑——内联样式里的旧坐标
+  // 就留在那儿，表现为"菜单先弹在上一次的位置，然后才跳回来"。
+  // 这里跟随坐标/目标条目变化重新摆放；apply 阶段在绘制前执行，
+  // 用户不会再看到闪跳。
+  createEffect(
+    () => [props.menu().visible, props.menu().x, props.menu().y, props.menu().item?.id] as const,
+    ([visible, x, y]) => {
+      if (!visible || !menuEl) return
+      positionMenuAt(menuEl, x, y)
+    },
+  )
 
   const submitNewTag = (event: SubmitEvent) => {
     event.preventDefault()
