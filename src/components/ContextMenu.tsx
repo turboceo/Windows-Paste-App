@@ -298,7 +298,7 @@ export default function ContextMenu({
                 }}
               >
                 <span className="item-glyph">&#xE710;</span>
-                <span className="item-label">新建分类标签...</span>
+                <span className="item-label">新建分类标签</span>
               </div>
             ) : (
               <form className="new-tag-form" onSubmit={handleCreateTagSubmit} onClick={(e) => e.stopPropagation()}>
