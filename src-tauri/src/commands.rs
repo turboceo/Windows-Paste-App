@@ -43,6 +43,12 @@ pub enum HostRequest {
     /// 复制指定文本到系统剪贴板
     #[serde(rename_all = "camelCase")]
     CopyText { text: String },
+    /// 对指定的图片条目立即执行一次 OCR（已存在的老记录也可以手动触发）
+    #[serde(rename_all = "camelCase")]
+    RunOcr {
+        #[serde(alias = "item_id")]
+        item_id: i64,
+    },
     /// 仅将内容写入系统剪贴板，不隐藏窗口、不模拟按键
     #[serde(rename_all = "camelCase")]
     Copy {
@@ -103,6 +109,18 @@ pub enum HostRequest {
     ToggleMaximize,
     Close,
     Quit,
+    /// 前端捕获到的运行时错误（window.onerror / ErrorBoundary / unhandledrejection）。
+    ///
+    /// 前端跑在 WebView 里，报错只出现在 DevTools 控制台，用户和日志都看不到；
+    /// 白屏时更是连界面都没了。这里把它落进 `app.log`，事后才有据可查。
+    #[serde(rename_all = "camelCase")]
+    ReportFrontendError {
+        message: String,
+        #[serde(default)]
+        stack: String,
+        #[serde(default)]
+        source: String,
+    },
 }
 
 /// Push helper so both commands and background threads emit the same envelope.
@@ -240,6 +258,68 @@ pub fn handle(app: &AppHandle, state: &mut AppState, req: HostRequest) {
                 push_items(app, state);
                 push_selection(app, state);
             }
+        }
+        HostRequest::RunOcr { item_id } => {
+            // 手动对已有图片记录执行 OCR：复制老图片、导入历史、或当初识别失败
+            // 的记录都能在这里补上文字，结果同样写回 Content 供搜索与复制。
+            let Some(item) = state.item_by_id(item_id) else {
+                return;
+            };
+            if item.item_type != crate::model::ClipboardItemType::Image {
+                return;
+            }
+            let Some(blob_name) = item.blob_path.clone() else {
+                emit_push(
+                    app,
+                    json!({ "type": "toast", "message": "这张图片的缓存文件已丢失，无法识别" }),
+                );
+                return;
+            };
+            let blob_path = state.paths.blobs.join(&blob_name);
+            if !blob_path.exists() {
+                emit_push(
+                    app,
+                    json!({ "type": "toast", "message": "这张图片的缓存文件已丢失，无法识别" }),
+                );
+                return;
+            }
+
+            // 已有识别结果时先清掉旧的那段，避免反复识别把文字越叠越长
+            let base_content = existing_ocr_base(&item.content);
+            let app_handle = app.clone();
+
+            emit_push(
+                app,
+                json!({ "type": "toast", "message": "正在识别图片文字..." }),
+            );
+
+            std::thread::spawn(move || {
+                let result = crate::ocr::recognize_file(&blob_path);
+                let Some(state_handle) = app_handle.try_state::<crate::worker::StateHandle>() else {
+                    return;
+                };
+                match result {
+                    Some(recognized) => {
+                        state_handle.send(crate::worker::Command::Dispatch(
+                            HostRequest::UpdateContent {
+                                item_id,
+                                content: format!("{}\n\n{}", base_content, recognized),
+                            },
+                        ));
+                        emit_push(
+                            &app_handle,
+                            json!({ "type": "toast", "message": "图片文字识别完成" }),
+                        );
+                    }
+                    None => emit_push(
+                        &app_handle,
+                        json!({
+                            "type": "toast",
+                            "message": "没有识别到文字，或当前系统缺少 OCR 语言包",
+                        }),
+                    ),
+                }
+            });
         }
         HostRequest::OpenDataDir => {
             let root = state.paths.root.clone();
@@ -465,6 +545,17 @@ pub fn handle(app: &AppHandle, state: &mut AppState, req: HostRequest) {
         HostRequest::Quit => {
             app.exit(0);
         }
+        HostRequest::ReportFrontendError { message, stack, source } => {
+            // 日志里一行写完，避免多行堆栈被时间戳前缀打断后不好 grep。
+            // 堆栈本身换行很多，压缩成 " | " 分隔。
+            let flat_stack = stack.replace(['\r', '\n'], " | ");
+            crate::logging::log(&format!(
+                "[前端错误] source={} message={} stack={}",
+                if source.is_empty() { "-" } else { &source },
+                message,
+                if flat_stack.is_empty() { "-" } else { &flat_stack }
+            ));
+        }
     }
 }
 
@@ -486,12 +577,12 @@ pub fn handle_captured(app: &AppHandle, state: &mut AppState, mut item: crate::m
         if let Some(ref blob_name) = item.blob_path {
             let blob_path = state.paths.blobs.join(blob_name);
             let item_id = item.id;
-            let original_content = item.content.clone();
+            let base_content = existing_ocr_base(&item.content);
             let app_handle = app.clone();
 
             std::thread::spawn(move || {
                 if let Some(recognized) = crate::ocr::recognize_file(&blob_path) {
-                    let combined = format!("{}\n\n{}", original_content, recognized);
+                    let combined = format!("{}\n\n{}", base_content, recognized);
                     if let Some(state_handle) = app_handle.try_state::<crate::worker::StateHandle>() {
                         state_handle.send(crate::worker::Command::Dispatch(HostRequest::UpdateContent {
                             item_id,
@@ -501,6 +592,17 @@ pub fn handle_captured(app: &AppHandle, state: &mut AppState, mut item: crate::m
                 }
             });
         }
+    }
+}
+
+/// 取出一条图片记录内容里的"非 OCR 部分"。
+///
+/// Content 的约定是 `<尺寸描述>\n\n<OCR 文本>`，重新识别前必须先剥掉旧的
+/// OCR 段，否则每触发一次就会把上一次的识别结果再接一遍，越叠越长。
+pub fn existing_ocr_base(content: &str) -> String {
+    match content.split_once("\n\n") {
+        Some((base, _)) => base.trim().to_string(),
+        None => content.trim().to_string(),
     }
 }
 
@@ -686,5 +788,18 @@ mod tests {
         let mut s = state_with(3, 8);
         move_selection(&mut s, 4);
         assert_eq!(s.selected_id, Some(3), "越界应夹到最后一项");
+    }
+
+    #[test]
+    fn test_existing_ocr_base_strips_previous_result() {
+        // 重新识别前必须先剥掉旧的 OCR 段，否则每触发一次就会越叠越长
+        assert_eq!(
+            existing_ocr_base("1920 x 1080 image\n\n第一行\n第二行"),
+            "1920 x 1080 image"
+        );
+        // 没有 OCR 段时原样返回
+        assert_eq!(existing_ocr_base("800 x 600 image"), "800 x 600 image");
+        // 首尾空白不该带出来
+        assert_eq!(existing_ocr_base("  640 x 480 image  "), "640 x 480 image");
     }
 }

@@ -54,6 +54,7 @@ export type HostRequest =
   | { type: 'paste'; itemId: number }
   | { type: 'copy'; itemId: number }
   | { type: 'copyText'; text: string }
+  | { type: 'runOcr'; itemId: number }
   | { type: 'openDataDir' }
   | { type: 'delete'; itemId: number }
   | { type: 'togglePin'; itemId: number }
@@ -74,6 +75,7 @@ export type HostRequest =
   | { type: 'toggleMaximize' }
   | { type: 'close' }
   | { type: 'quit' }
+  | { type: 'reportFrontendError'; message: string; stack?: string; source?: string }
 
 /** Messages the native host pushes to the web UI. */
 export type HostPush =

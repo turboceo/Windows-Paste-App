@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ClipboardItem } from '../types'
 import { relativeTime } from '../time'
+import { hasOcrText } from '../ocr'
 
 interface ClipCardProps {
   item: ClipboardItem
@@ -136,7 +137,7 @@ export default function ClipCard({
       case 'image': {
         const match = item.content.match(/(\d+)\s*x\s*(\d+)/i)
         const sizeStr = match ? `${match[1]} × ${match[2]}` : '图片'
-        return item.content.includes('\n\n') ? `${sizeStr} · 含文字` : sizeStr
+        return hasOcrText(item.content, item.type) ? `${sizeStr} · 含文字` : sizeStr
       }
       default: {
         const len = item.content.length

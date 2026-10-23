@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClipboardItem } from '../types'
 import { TAG_COLOR_PALETTE, getTagColor } from '../tagColors'
+import { extractOcrText, hasOcrText } from '../ocr'
 
 export interface ContextMenuState {
   visible: boolean
@@ -16,6 +17,8 @@ interface ContextMenuProps {
   onClose: () => void
   onPaste: (item: ClipboardItem) => void
   onCopyText?: (text: string) => void
+  onRunOcr?: (item: ClipboardItem) => void
+  onViewOcr?: (item: ClipboardItem) => void
   onTogglePin: (item: ClipboardItem) => void
   onRemove: (item: ClipboardItem) => void
   onSetTag: (item: ClipboardItem, tag: string | null) => void
@@ -42,6 +45,8 @@ export default function ContextMenu({
   onClose,
   onPaste,
   onCopyText,
+  onRunOcr,
+  onViewOcr,
   onTogglePin,
   onRemove,
   onSetTag,
@@ -94,6 +99,11 @@ export default function ContextMenu({
   //
   // 这个组件在菜单隐藏时只是 `return null`、并不会卸载，所以 state 会留着：
   // 不重置的话，"展开子菜单 → 关闭 → 右键另一张卡"会看到子菜单自动弹出来。
+  //
+  // 注意这里**不**碰位置：位置由 `<div key>` 重新挂载 + ref 回调一次性算出，
+  // 一旦把位置也塞进这个 effect，就会和测量逻辑形成互相触发的更新循环
+  // （测量 → setState → 重置 → 再测量），重则抛 Maximum update depth exceeded、
+  // 整棵 React 树被卸载成白屏。
   useEffect(() => {
     cancelScheduledClose()
     setShowSubMenu(false)
@@ -136,6 +146,69 @@ export default function ContextMenu({
     }
   }, [isCreatingTag])
 
+  // 定位：在节点挂载的那一帧量一次真实尺寸，直接写 style，不经过 React state。
+  //
+  // 为什么不用 state + useLayoutEffect：那会让"测量 → setState → 重渲染"
+  // 和别的 effect 互相触发，形成更新死循环（生产构建里会直接抛
+  // Maximum update depth exceeded，整棵 React 树被卸载 —— 白屏）。
+  // 用 ref 回调 + 命令式写 style，一次算完就结束，循环从结构上不存在。
+  //
+  // 配合 `<div key={menuKey}>`：每次右键都是全新节点，ref 回调必然重跑，
+  // 所以不需要"位置变了要重新测量"这类依赖。
+  const menuKey = `${menu.item?.id ?? '-'}:${menu.x}:${menu.y}`
+
+  const positionMenu = useCallback(
+    (el: HTMLDivElement | null) => {
+      menuRef.current = el
+      if (!el) return
+
+      const gap = 8
+      const rect = el.getBoundingClientRect()
+
+      // 期望位置以鼠标坐标为准；放不下就整体左移/上移，保证完整可见。
+      const x = Math.max(gap, Math.min(menu.x, window.innerWidth - rect.width - gap))
+      const y = Math.max(gap, Math.min(menu.y, window.innerHeight - rect.height - gap))
+
+      el.style.left = `${x}px`
+      el.style.top = `${y}px`
+      // 位置算好了才显形：避免菜单先在旧位置/左上角闪一下
+      el.style.visibility = 'visible'
+    },
+    [menu.x, menu.y],
+  )
+
+  // 子菜单的翻边与高度限制。
+  //
+  // 同样的思路：不用 useLayoutEffect + state，而是每次 showSubMenu 变化后
+  // 量一次、直接改 class 和 style。翻边是"改一次就不再变"的幂等操作，
+  // 不存在反复触发的风险。
+  useEffect(() => {
+    if (!showSubMenu) return
+    const menuEl = menuRef.current
+    if (!menuEl) return
+
+    const subMenu = menuEl.querySelector<HTMLElement>('.paste-sub-menu')
+    if (!subMenu) return
+
+    // 先按默认方向（右侧）量一次
+    subMenu.classList.remove('flip-left')
+    subMenu.style.maxHeight = ''
+
+    const gap = 10
+    const first = subMenu.getBoundingClientRect()
+    if (first.right > window.innerWidth - gap) {
+      // 右边放不下：翻到主菜单左侧，翻完再量一次高度
+      subMenu.classList.add('flip-left')
+    }
+
+    const rect = subMenu.getBoundingClientRect()
+    const available = window.innerHeight - rect.top - gap
+    // 标签特别多时限制高度、内部滚动，避免子菜单溢出视口底部
+    if (available > 120 && rect.height > available) {
+      subMenu.style.maxHeight = `${available}px`
+    }
+  }, [showSubMenu, mergedTags.length, isCreatingTag])
+
   if (!menu.visible || !menu.item) {
     return null
   }
@@ -156,17 +229,12 @@ export default function ContextMenu({
     }
   }
 
-  // 视口边界保护，防止右键菜单超出屏幕边缘
-  const menuWidth = 190
-  const menuHeight = 220
-  const adjustedX = Math.min(menu.x, window.innerWidth - menuWidth - 10)
-  const adjustedY = Math.min(menu.y, window.innerHeight - menuHeight - 10)
-
   return (
     <div
-      ref={menuRef}
+      key={menuKey}
+      ref={positionMenu}
       className="paste-context-menu"
-      style={{ left: `${adjustedX}px`, top: `${adjustedY}px` }}
+      style={{ visibility: 'hidden' }}
       onContextMenu={(e) => e.preventDefault()}
     >
       {/* 1. 立即粘贴 */}
@@ -195,22 +263,49 @@ export default function ContextMenu({
         <kbd className="item-shortcut">Ctrl+P</kbd>
       </div>
 
-      {/* 2.5 图片卡片：如果提取到了 OCR 文本，允许直接复制文本 */}
-      {item.type === 'Image' && item.content.includes('\n\n') && (
-        <div
-          className="menu-item"
-          onClick={() => {
-            const parts = item.content.split('\n\n')
-            const ocrText = parts.slice(1).join('\n\n').trim()
-            if (ocrText && onCopyText) {
-              onCopyText(ocrText)
-            }
-            onClose()
-          }}
-        >
-          <span className="item-glyph">&#xE8C1;</span>
-          <span className="item-label">复制图片中的文字 (OCR)</span>
-        </div>
+      {/* 2.5 图片卡片：OCR 文本提取 */}
+      {item.type === 'Image' && (
+        <>
+          {hasOcrText(item.content, item.type) ? (
+            <>
+              <div
+                className="menu-item"
+                onClick={() => {
+                  onViewOcr?.(item)
+                  onClose()
+                }}
+              >
+                <span className="item-glyph">&#xE8A5;</span>
+                <span className="item-label">查看识别文字</span>
+              </div>
+              <div
+                className="menu-item"
+                onClick={() => {
+                  const ocrText = extractOcrText(item.content)
+                  if (ocrText && onCopyText) {
+                    onCopyText(ocrText)
+                  }
+                  onClose()
+                }}
+              >
+                <span className="item-glyph">&#xE8C8;</span>
+                <span className="item-label">复制图片中的文字 (OCR)</span>
+              </div>
+            </>
+          ) : (
+            <div
+              className="menu-item"
+              title="已存在的图片也能随时补做一次文字识别"
+              onClick={() => {
+                onRunOcr?.(item)
+                onClose()
+              }}
+            >
+              <span className="item-glyph">&#xE8C1;</span>
+              <span className="item-label">识别图片中的文字 (OCR)</span>
+            </div>
+          )}
+        </>
       )}
 
       <div className="menu-divider" />

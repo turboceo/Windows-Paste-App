@@ -8,10 +8,12 @@ import ConfirmDialog from './components/ConfirmDialog'
 import Toast, { type ToastState } from './components/Toast'
 import OnboardingGuide from './components/OnboardingGuide'
 import SettingsDialog from './components/SettingsDialog'
+import OcrTextViewer from './components/OcrTextViewer'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
 import { isHosted, onPush, send } from './bridge'
 import type { ClipboardItem, HostPush, ImportPreview } from './types'
 import { loadTagColors, saveTagColors } from './tagColors'
+import { extractOcrText, ocrBaseContent } from './ocr'
 
 /** 搜索防抖窗口：连续输入合并成一次后端查询。 */
 const SEARCH_DEBOUNCE_MS = 120
@@ -71,6 +73,9 @@ export default function App() {
   const [appVersion, setAppVersion] = useState('0.2.0')
   const [dataRoot, setDataRoot] = useState('')
   const [blobsRoot, setBlobsRoot] = useState('')
+
+  /** 正在查看的图片 OCR 文本；非空时弹出只读查看窗 */
+  const [ocrPreview, setOcrPreview] = useState<{ text: string; imageLabel: string } | null>(null)
 
   const onCloseGuide = useCallback(() => {
     setShowGuide(false)
@@ -359,6 +364,18 @@ export default function App() {
     send({ type: 'copy', itemId: item.id })
   }, [])
 
+  /** 对已存在的图片记录补做一次 OCR（右键菜单里手动触发） */
+  const onRunOcr = useCallback((item: ClipboardItem) => {
+    send({ type: 'runOcr', itemId: item.id })
+  }, [])
+
+  /** 打开识别文字查看窗：先看内容，要不要复制由用户决定 */
+  const onViewOcr = useCallback((item: ClipboardItem) => {
+    const text = extractOcrText(item.content)
+    if (!text) return
+    setOcrPreview({ text, imageLabel: ocrBaseContent(item.content) })
+  }, [])
+
   const onTogglePin = useCallback((item: ClipboardItem) => {
     send({ type: 'togglePin', itemId: item.id })
   }, [])
@@ -595,6 +612,8 @@ export default function App() {
           onClose={onCloseContextMenu}
           onPaste={onPaste}
           onCopyText={(text) => send({ type: 'copyText', text })}
+          onRunOcr={onRunOcr}
+          onViewOcr={onViewOcr}
           onTogglePin={onTogglePin}
           onRemove={onRemove}
           onSetTag={onSetTag}
@@ -680,6 +699,15 @@ export default function App() {
           blobsRoot={blobsRoot}
           onClose={() => setShowSettings(false)}
           onOpenDataDir={() => send({ type: 'openDataDir' })}
+        />
+
+        {/* 12. 图片 OCR 识别结果查看（只读，可一键复制） */}
+        <OcrTextViewer
+          open={ocrPreview !== null}
+          text={ocrPreview?.text ?? ''}
+          imageLabel={ocrPreview?.imageLabel ?? ''}
+          onCopy={(text) => send({ type: 'copyText', text })}
+          onClose={() => setOcrPreview(null)}
         />
       </div>
     </div>

@@ -1323,6 +1323,20 @@ body.is-dragging-card .card-slot .paste-card {
   padding: 4px;
 }
 
+/* 右边放不下时整体翻到主菜单左侧（由 ContextMenu 的 useLayoutEffect 决定） */
+.paste-sub-menu.flip-left {
+  left: auto;
+  right: 100%;
+  margin-left: 0;
+  margin-right: 4px;
+}
+
+/* 翻到左边时，把补空隙的伪元素也镜像过去 */
+.paste-sub-menu.flip-left::before {
+  left: auto;
+  right: -6px;
+}
+
 /*
  * 用一块透明区域把"主菜单与子菜单之间的 4px 空隙"补上。
  *
@@ -2666,6 +2680,193 @@ body.is-dragging-card .card-slot .paste-card {
 }
 
 .settings-tip {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* ==========================================================================
+   OCR 识别文字查看器
+   ========================================================================== */
+.dialog.ocr-viewer {
+  width: min(560px, 94vw);
+  max-height: min(560px, 86vh);
+  display: flex;
+  flex-direction: column;
+  padding: 18px 20px 16px;
+}
+
+.ocr-viewer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+.ocr-viewer-titles {
+  min-width: 0;
+}
+
+.dialog-title.ocr-viewer-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.ocr-viewer-glyph {
+  font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
+  font-size: 15px;
+  color: #ea8a1f;
+}
+
+.ocr-viewer-meta {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.ocr-viewer-close {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-dim);
+  font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 120ms ease;
+}
+
+.ocr-viewer-close:hover {
+  background: rgba(0, 0, 0, 0.1);
+  color: var(--text-main);
+}
+
+/* 识别结果区：可选中、可滚动，等宽字体让换行与原始排版一致 */
+.ocr-viewer-text {
+  flex: 1 1 auto;
+  min-height: 90px;
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.72;
+  color: var(--text-main);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-y: auto;
+  user-select: text;
+  cursor: text;
+}
+
+.ocr-viewer-actions {
+  flex: 0 0 auto;
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ocr-viewer-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.ocr-viewer-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 560px) {
+  /* 窄窗口下提示语让位给按钮，别把复制按钮挤出去 */
+  .ocr-viewer-hint { display: none; }
+}
+
+/* ==========================================================================
+   Crash Screen（渲染出错时的兜底界面）
+   ========================================================================== */
+.crash-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--panel-bg);
+}
+
+.crash-box {
+  width: min(460px, 100%);
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  box-shadow: 0 18px 44px -12px rgba(15, 23, 42, 0.18);
+  padding: 22px 24px 20px;
+  text-align: center;
+}
+
+.crash-glyph {
+  font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
+  font-size: 30px;
+  line-height: 1;
+  color: #ea8a1f;
+  margin-bottom: 10px;
+}
+
+.crash-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.crash-desc {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-muted);
+}
+
+.crash-detail {
+  margin: 0 0 16px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.07);
+  border: 1px solid rgba(239, 68, 68, 0.16);
+  color: #b91c1c;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: left;
+  max-height: 92px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.crash-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.crash-hint {
+  margin: 14px 0 0;
   font-size: 11px;
   color: var(--text-dim);
 }
