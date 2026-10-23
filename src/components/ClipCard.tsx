@@ -135,7 +135,8 @@ export default function ClipCard({
         return item.content.trim()
       case 'image': {
         const match = item.content.match(/(\d+)\s*x\s*(\d+)/i)
-        return match ? `${match[1]} × ${match[2]}` : '图片'
+        const sizeStr = match ? `${match[1]} × ${match[2]}` : '图片'
+        return item.content.includes('\n\n') ? `${sizeStr} · 含文字` : sizeStr
       }
       default: {
         const len = item.content.length

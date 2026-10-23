@@ -15,6 +15,7 @@ interface ContextMenuProps {
   tagColors?: Record<string, string>
   onClose: () => void
   onPaste: (item: ClipboardItem) => void
+  onCopyText?: (text: string) => void
   onTogglePin: (item: ClipboardItem) => void
   onRemove: (item: ClipboardItem) => void
   onSetTag: (item: ClipboardItem, tag: string | null) => void
@@ -40,6 +41,7 @@ export default function ContextMenu({
   tagColors,
   onClose,
   onPaste,
+  onCopyText,
   onTogglePin,
   onRemove,
   onSetTag,
@@ -192,6 +194,24 @@ export default function ContextMenu({
         <span className="item-label">{item.pinned ? '取消置顶' : '置顶卡片'}</span>
         <kbd className="item-shortcut">Ctrl+P</kbd>
       </div>
+
+      {/* 2.5 图片卡片：如果提取到了 OCR 文本，允许直接复制文本 */}
+      {item.type === 'Image' && item.content.includes('\n\n') && (
+        <div
+          className="menu-item"
+          onClick={() => {
+            const parts = item.content.split('\n\n')
+            const ocrText = parts.slice(1).join('\n\n').trim()
+            if (ocrText && onCopyText) {
+              onCopyText(ocrText)
+            }
+            onClose()
+          }}
+        >
+          <span className="item-glyph">&#xE8C1;</span>
+          <span className="item-label">复制图片中的文字 (OCR)</span>
+        </div>
+      )}
 
       <div className="menu-divider" />
 

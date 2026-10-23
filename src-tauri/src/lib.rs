@@ -11,6 +11,7 @@ pub mod filedialog;
 pub mod hotkey;
 pub mod logging;
 pub mod model;
+pub mod ocr;
 pub mod paste;
 pub mod selftest;
 pub mod single_instance;

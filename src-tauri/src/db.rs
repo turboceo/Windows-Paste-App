@@ -344,6 +344,15 @@ impl Database {
         Ok(())
     }
 
+    /// 更新条目的内容描述（例如图片 OCR 识别文本提取后追加到 Content 中，供搜索与提取）
+    pub fn update_content(&self, id: i64, content: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE ClipboardItems SET Content = ?1 WHERE Id = ?2",
+            params![content, id],
+        )?;
+        Ok(())
+    }
+
     pub fn get_all_tags(&self) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT Tag FROM ClipboardItems WHERE Tag IS NOT NULL AND Tag != '' ORDER BY Tag ASC",

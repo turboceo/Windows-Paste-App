@@ -53,6 +53,7 @@ export type HostRequest =
   | { type: 'move'; delta: number }
   | { type: 'paste'; itemId: number }
   | { type: 'copy'; itemId: number }
+  | { type: 'copyText'; text: string }
   | { type: 'openDataDir' }
   | { type: 'delete'; itemId: number }
   | { type: 'togglePin'; itemId: number }

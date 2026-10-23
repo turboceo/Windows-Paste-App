@@ -594,6 +594,7 @@ export default function App() {
           tagColors={tagColors}
           onClose={onCloseContextMenu}
           onPaste={onPaste}
+          onCopyText={(text) => send({ type: 'copyText', text })}
           onTogglePin={onTogglePin}
           onRemove={onRemove}
           onSetTag={onSetTag}

@@ -33,6 +33,16 @@ pub enum HostRequest {
         #[serde(alias = "item_id")]
         item_id: i64,
     },
+    /// 更新某条记录的 Content（例如后台异步 OCR 提取结果就绪）
+    #[serde(rename_all = "camelCase")]
+    UpdateContent {
+        #[serde(alias = "item_id")]
+        item_id: i64,
+        content: String,
+    },
+    /// 复制指定文本到系统剪贴板
+    #[serde(rename_all = "camelCase")]
+    CopyText { text: String },
     /// 仅将内容写入系统剪贴板，不隐藏窗口、不模拟按键
     #[serde(rename_all = "camelCase")]
     Copy {
@@ -200,6 +210,35 @@ pub fn handle(app: &AppHandle, state: &mut AppState, req: HostRequest) {
                         "message": "已复制到剪贴板",
                     }),
                 );
+            }
+        }
+        HostRequest::CopyText { text } => {
+            crate::paste::PasteService::write_to_clipboard(
+                &crate::model::ClipboardItem {
+                    id: 0,
+                    item_type: crate::model::ClipboardItemType::Text,
+                    content: text,
+                    blob_path: None,
+                    hash: String::new(),
+                    created_at: chrono::Local::now(),
+                    pinned: false,
+                    tag: None,
+                },
+                &state.paths.blobs,
+            );
+            emit_push(
+                app,
+                json!({
+                    "type": "toast",
+                    "message": "已复制提取的文本",
+                }),
+            );
+        }
+        HostRequest::UpdateContent { item_id, content } => {
+            if state.db.update_content(item_id, &content).is_ok() {
+                state.reload();
+                push_items(app, state);
+                push_selection(app, state);
             }
         }
         HostRequest::OpenDataDir => {
@@ -440,6 +479,29 @@ pub fn handle_captured(app: &AppHandle, state: &mut AppState, mut item: crate::m
     state.reload();
     push_items(app, state);
     push_selection(app, state);
+
+    // 如果捕获的是图片，并且存在本地 PNG 文件，则在独立后台线程静默执行 WinRT OCR
+    // 识别完成后更新该条目的 Content 并刷新推送，使图片内容支持检索
+    if matches!(item.item_type, crate::model::ClipboardItemType::Image) {
+        if let Some(ref blob_name) = item.blob_path {
+            let blob_path = state.paths.blobs.join(blob_name);
+            let item_id = item.id;
+            let original_content = item.content.clone();
+            let app_handle = app.clone();
+
+            std::thread::spawn(move || {
+                if let Some(recognized) = crate::ocr::recognize_file(&blob_path) {
+                    let combined = format!("{}\n\n{}", original_content, recognized);
+                    if let Some(state_handle) = app_handle.try_state::<crate::worker::StateHandle>() {
+                        state_handle.send(crate::worker::Command::Dispatch(HostRequest::UpdateContent {
+                            item_id,
+                            content: combined,
+                        }));
+                    }
+                }
+            });
+        }
+    }
 }
 
 /// 处理"面板被唤出"：记住目标窗口、清空搜索与分类、刷新列表。
