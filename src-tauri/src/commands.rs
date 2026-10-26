@@ -57,6 +57,9 @@ pub enum HostRequest {
     },
     /// 打开数据与文件保存的本地目录
     OpenDataDir,
+    /// 在系统默认浏览器中打开指定链接
+    #[serde(rename_all = "camelCase")]
+    OpenUrl { url: String },
     #[serde(rename_all = "camelCase")]
     Delete {
         #[serde(alias = "item_id")]
@@ -325,6 +328,16 @@ pub fn handle(app: &AppHandle, state: &mut AppState, req: HostRequest) {
             let root = state.paths.root.clone();
             std::thread::spawn(move || {
                 let _ = std::process::Command::new("explorer").arg(&root).spawn();
+            });
+        }
+        HostRequest::OpenUrl { url } => {
+            let u = url.clone();
+            std::thread::spawn(move || {
+                // Windows 下通过 explorer / rundll32 调用默认浏览器打开 URL
+                let _ = std::process::Command::new("rundll32")
+                    .arg("url.dll,FileProtocolHandler")
+                    .arg(&u)
+                    .spawn();
             });
         }
         HostRequest::Delete { item_id } => {

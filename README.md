@@ -30,7 +30,7 @@
     - 双击卡片直接复制内容到剪贴板，**保持窗口留在前台不退到后台**；按 `Enter` 键或右键选择「立即粘贴」可将内容回写并注入 `Ctrl + V` 到前台程序；
     - `Ctrl + P` 或悬停卡片头部点击图钉按钮置顶条目；
     - `Del` 或悬停卡片头部点击垃圾桶按钮移除记录（删除后选中停在原来的位置）；
-    - 标题栏内置「使用指南」与「设置（查看版本、定位存储目录）」弹窗；
+    - 标题栏内置「使用指南」与「设置（查看版本、定位存储目录、版本更新检测）」弹窗；
     - **本地离线 OCR 图文识别**：基于 Windows 原生 WinRT OCR 引擎，自动在后台识别图片中的文字并建立索引，**支持通过文字搜索图片**；图片右键菜单可一键「复制图片中的文字 (OCR)」，已经存在的旧图片也能右键手动补做识别。
 - **本地存储与隐私保护**：采用嵌入式 SQLite（`rusqlite bundled`，WAL 模式），数据完全保存在本地 `%LOCALAPPDATA%\WindowsPaste\history.db`，图片缓存存为本地 PNG（sha256 内容寻址），绝不上云。
 - **单实例常驻**：命名互斥量保证只跑一个进程；再次启动会唤回已有面板，而不是开出第二个托盘图标和第二个数据库连接。
@@ -59,10 +59,11 @@
 ├── package.json               # 前端依赖配置
 ├── vite.config.ts             # Vite 构建打包配置
 ├── tsconfig.json              # TypeScript 编译配置
-├── src/                       # React 前端工程
+├── src/                       # 前端工程 (基于 SolidJS 2.0)
 │   ├── main.tsx               # 前端入口
 │   ├── App.tsx                # 主壳层、全局键盘事件、导入确认与 toast
 │   ├── bridge.ts              # Tauri invoke 与 listen 桥接层
+│   ├── updater.ts             # GitHub Releases 版本检测与 SemVer 解析
 │   ├── time.ts                # 卡片头部的相对时间格式化
 │   ├── tagColors.ts           # 分类标签自定义颜色调色盘与持久化
 │   ├── assets.ts              # blob 文件名 → asset 协议 URL

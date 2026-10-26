@@ -56,6 +56,7 @@ export type HostRequest =
   | { type: 'copyText'; text: string }
   | { type: 'runOcr'; itemId: number }
   | { type: 'openDataDir' }
+  | { type: 'openUrl'; url: string }
   | { type: 'delete'; itemId: number }
   | { type: 'togglePin'; itemId: number }
   | { type: 'setTag'; itemId: number; tag: string | null }

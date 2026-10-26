@@ -635,6 +635,7 @@ export default function App() {
           blobsRoot={blobsRoot}
           onClose={() => setShowSettings(false)}
           onOpenDataDir={() => send({ type: 'openDataDir' })}
+          onOpenUrl={(url) => send({ type: 'openUrl', url })}
         />
 
         {/* 12. 图片 OCR 识别结果查看（只读，可一键复制） */}
