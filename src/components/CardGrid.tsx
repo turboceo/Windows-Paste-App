@@ -453,15 +453,28 @@ export default function CardGrid(props: CardGridProps) {
     },
   )
 
-  // 保持选中项可见
+  // 保持选中项可见。
+  //
+  // 只在"选中项变了"或"它挪到了别的槽位"时滚动。列表内容更新
+  // （例如 OCR 把识别文字写回某条记录）会带着新的 items 触发本 effect，
+  // 但那种时候用户可能已经自己滚开了视图——再把它拽回选中卡片，
+  // 就是"识别完成瞬间页面跳回另一张卡"的来源。用 key 把这两种情况分开。
+  let keepViewKey: string | null = null
   createEffect(
     () => [props.selectedId(), activeItems(), geometry()] as const,
     ([selected, list, geo]) => {
       // 拖拽期间由指针决定滚动位置，不能和自动滚动打架
       if (session || pending) return
-      if (!containerEl || selected === null) return
+      if (!containerEl || selected === null) {
+        keepViewKey = null
+        return
+      }
       const index = list.findIndex((item) => item.id === selected)
       if (index === -1) return
+
+      const key = `${selected}:${index}`
+      if (key === keepViewKey) return
+      keepViewKey = key
 
       const row = Math.floor(index / geo.cols)
       const itemTop = PADDING_TOP + row * geo.rowStep
