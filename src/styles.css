@@ -1092,6 +1092,63 @@ body.is-dragging-card .card-slot .paste-card {
   box-shadow: 0 2px 6px rgba(234, 138, 31, 0.28);
 }
 
+/*
+ * 新建分类按钮。
+ *
+ * 放在滚动容器内部、紧跟最后一个胶囊：标签再多也能跟着滚到，
+ * 不像放在容器外那样永远占着一格、还可能与右箭头重叠。
+ * 视觉上刻意比胶囊收敛——加号是工具，不该和"全部"抢注意力。
+ */
+.tag-create-btn {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px dashed rgba(0, 0, 0, 0.22);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: 'Segoe MDL2 Assets', 'Segoe Fluent Icons', sans-serif;
+  font-size: 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 140ms ease;
+}
+
+.tag-create-btn:hover {
+  background: #ffffff;
+  color: #ea8a1f;
+  border-color: #ea8a1f;
+  border-style: solid;
+}
+
+.tag-create-btn:active {
+  transform: scale(0.94);
+}
+
+/* 新建浮层里的表单容器：比"管理"浮层宽一点，放得下输入框和整行调色盘 */
+.popover-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+/* 调色盘 11 个色钮、每个 13px + 4px 间距，一行需要约 190px；
+   管理浮层的 196px 本来够用，但输入框那一行还要让出颜色预览和确认按钮，
+   所以新建时整体放宽一档，避免两行折行后高度跳动。 */
+.tag-chip-popover:has(.popover-create-form) {
+  min-width: 216px;
+}
+
+/* 校验失败提示。出现时不改动布局高度之外的任何东西，避免输入框跳动 */
+.popover-error {
+  font-size: 11px;
+  color: #dc2626;
+  line-height: 1.3;
+}
+
 /* 标签右键菜单/颜色管理浮层 */
 .tag-chip-popover {
   position: fixed;
@@ -1363,6 +1420,19 @@ body.is-dragging-card .card-slot .paste-card {
   letter-spacing: -0.1px;
 }
 
+/*
+ * 一个分类都没有时的子菜单提示。
+ *
+ * 新建分类搬到标签栏之后，右键菜单里只剩"选已有分类"，
+ * 空列表时这里必须告诉用户去哪儿建，否则看起来像是功能坏了。
+ */
+.submenu-empty {
+  padding: 4px 10px 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
 .tag-dot {
   width: 6px;
   height: 6px;
@@ -1420,15 +1490,6 @@ body.is-dragging-card .card-slot .paste-card {
   background: rgba(0, 0, 0, 0.04);
   border-radius: 6px;
   animation: contextMenuPop 90ms ease;
-}
-
-.new-tag-form {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 6px;
-  background: rgba(0, 0, 0, 0.02);
-  border-radius: 6px;
 }
 
 .new-tag-input-row {
@@ -3205,6 +3266,21 @@ body.is-dragging-card .card-slot .paste-card {
     color: #ffffff;
   }
 
+  .tag-create-btn {
+    border-color: rgba(255, 214, 170, 0.26);
+    color: #b8a58e;
+  }
+
+  .tag-create-btn:hover {
+    background: rgba(255, 214, 170, 0.12);
+    color: #f0c681;
+    border-color: #e0a33c;
+  }
+
+  .popover-error {
+    color: #fca5a5;
+  }
+
   .paste-context-menu,
   .paste-sub-menu {
     background: rgba(46, 38, 29, 0.97);
@@ -3224,10 +3300,6 @@ body.is-dragging-card .card-slot .paste-card {
     background: rgba(255, 214, 170, 0.09);
     border-color: rgba(255, 214, 170, 0.18);
     color: #f2e7d8;
-  }
-
-  .new-tag-form {
-    background: rgba(0, 0, 0, 0.18);
   }
 
   .palette-color-btn.active {

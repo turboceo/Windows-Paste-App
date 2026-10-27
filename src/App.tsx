@@ -46,6 +46,25 @@ export default function App() {
   const [tagCounts, setTagCounts] = createSignal<Record<string, number>>({})
   const [activeTag, setActiveTag] = createSignal<string | null>(null)
   const [tagColors, setTagColors] = createSignal<Record<string, string>>(loadTagColors())
+  /**
+   * 在标签栏新建、但还没有任何条目引用的空分类。
+   *
+   * 数据库里没有 Tags 表——标签只是 `ClipboardItems.Tag` 这个字符串字段，
+   * 由 `SELECT DISTINCT` 汇总出来（见 db.rs 的注释）。所以一个没人引用的
+   * 标签在库里根本不存在，也就活不过重启。
+   *
+   * 但用户点「+」建完分类的那一刻，它必须**立刻**出现在标签栏和右键菜单里，
+   * 否则界面就像"点了没反应"。因此这里在前端多留一份，
+   * 与后端真实标签合并后展示；一旦有卡片用上它，后端推送就会把它接管过去，
+   * 这份草稿随之失去意义（由下面的 effect 清理）。
+   */
+  const [pendingTags, setPendingTags] = createSignal<string[]>([])
+  /** 标签栏与右键菜单实际展示的分类 = 后端真实标签 ∪ 前端空标签 */
+  const visibleTags = () => {
+    const merged = new Set(pendingTags())
+    for (const tag of allTags()) merged.add(tag)
+    return Array.from(merged)
+  }
 
   // toast 与导入确认
   const [toast, setToast] = createSignal<ToastState>({ visible: false, message: '' })
@@ -227,6 +246,48 @@ export default function App() {
 
   const onExport = () => send({ type: 'export', path: null })
 
+  /**
+   * 后端推送一旦包含某个空标签，就说明它已经被某张卡片引用、
+   * 真正落库了——这时该由 `allTags` 接管，草稿里那份要撤掉。
+   *
+   * 不做这一步的后果：`visibleTags` 会把同一个标签列两次（一次来自
+   * pendingTags，一次来自 allTags），标签栏和右键菜单里出现重复胶囊。
+   */
+  createEffect(
+    () => allTags(),
+    (backendTags) => {
+      setPendingTags((prev) => {
+        const next = prev.filter((tag) => !backendTags.includes(tag))
+        return next.length === prev.length ? prev : next
+      })
+    },
+  )
+
+  /**
+   * 标签栏上新建分类。
+   *
+   * 颜色立刻存进 localStorage（这是纯前端配置，本来就不该等后端）；
+   * 标签名先作为"空标签"进入 pendingTags 让它立即可见、可筛选。
+   *
+   * 如果当前有选中卡片，顺手把它分到这个新分类下——用户建分类的意图
+   * 九成是给正在看的这张卡归类，等他再去右键一趟反而多余。
+   * 没有选中卡片时也无妨：标签照样显示，等他自己挑卡片归类。
+   */
+  const onCreateTag = (tag: string, color: string) => {
+    setTagColors((prev) => {
+      const next = { ...prev, [tag]: color }
+      saveTagColors(next)
+      return next
+    })
+
+    setPendingTags((prev) => (prev.includes(tag) ? prev : [...prev, tag]))
+
+    const selected = selectedId()
+    if (selected !== null) {
+      send({ type: 'setTag', itemId: selected, tag })
+    }
+  }
+
   const onRequestImport = (path: string) => send({ type: 'previewImport', path })
 
   /**
@@ -256,6 +317,9 @@ export default function App() {
       saveTagColors(next)
       return next
     })
+    // 草稿里可能也躺着这个标签（建了但还没分给任何卡片）——
+    // 删分类必须把它一起收掉，否则它会在标签栏里原地复活。
+    setPendingTags((prev) => prev.filter((t) => t !== tag))
     setPendingTagDelete(null)
   }
 
@@ -483,13 +547,14 @@ export default function App() {
           )}
         </Show>
 
-        {/* 2. YouTube 风格分类 Tag 快捷切换标签栏 */}
+        {/* 2. YouTube 风格分类 Tag 快捷切换标签栏（含新建分类入口） */}
         <TagFilterBar
-          allTags={allTags}
+          allTags={visibleTags}
           activeTag={activeTag}
           tagColors={tagColors}
           onFilterTag={onFilterTag}
           onSaveTagColor={onSaveTagColor}
+          onCreateTag={onCreateTag}
           onDeleteTag={(tag) => setPendingTagDelete(tag)}
         />
 
@@ -545,7 +610,7 @@ export default function App() {
         {/* 5. 原生风格右键上下文菜单 */}
         <ContextMenu
           menu={contextMenu}
-          allTags={allTags}
+          allTags={visibleTags}
           tagColors={tagColors}
           onClose={onCloseContextMenu}
           onPaste={onPaste}

@@ -44,18 +44,16 @@ const SUBMENU_CLOSE_DELAY = 160
  */
 export default function ContextMenu(props: ContextMenuProps) {
   const [showSubMenu, setShowSubMenu] = createSignal(false)
-  const [isCreatingTag, setIsCreatingTag] = createSignal(false)
-  const [newTagInput, setNewTagInput] = createSignal('')
-  const [selectedColor, setSelectedColor] = createSignal<string>(TAG_COLOR_PALETTE[0])
   const [colorEditingTag, setColorEditingTag] = createSignal<string | null>(null)
 
   let menuEl: HTMLDivElement | undefined
   let subMenuEl: HTMLDivElement | undefined
-  let inputEl: HTMLInputElement | undefined
   /** 收起子菜单的延时任务；鼠标回到主菜单项时要取消它 */
   let closeTimer: number | null = null
 
-  // 只列数据库里真实存在的分类。
+  // 候选分类：后端真实存在的（`SELECT DISTINCT Tag`）加上前端在标签栏
+  // 新建、还没有条目引用的空标签。两者都由 App 合并后经 `allTags` 传进来，
+  // 这里只管列出来，不关心它来自哪里。
   // 声明必须放在所有 effect 之前：Solid 的 compute 在创建时就同步执行，
   // 而 const 在初始化前处于暂时性死区（TDZ），后置声明会直接抛
   // "Cannot access before initialization"。
@@ -74,8 +72,8 @@ export default function ContextMenu(props: ContextMenuProps) {
   }
 
   const scheduleCloseSubMenu = () => {
-    // 正在输入新标签时绝不收起，否则输一半的标签会连同菜单一起消失
-    if (isCreatingTag()) return
+    // 子菜单里现在只剩「选已有分类」和「改颜色」两种操作，没有输入态，
+    // 所以收起条件不再有例外。
     cancelScheduledClose()
     closeTimer = window.setTimeout(() => {
       closeTimer = null
@@ -85,19 +83,16 @@ export default function ContextMenu(props: ContextMenuProps) {
 
   onCleanup(cancelScheduledClose)
 
-  // 菜单关掉、或右键了另一张卡片时，重置子菜单与输入态。
+  // 菜单关掉、或右键了另一张卡片时，重置子菜单与改色态。
   // 位置不在这里重置——它由节点重新挂载时的一次性测量负责。
   createEffect(
     // compute：只读依赖
     () => [props.menu().visible, props.menu().item?.id],
-    // apply：重置子菜单与输入态
+    // apply：重置子菜单与改色态
     () => {
       cancelScheduledClose()
       setShowSubMenu(false)
-      setIsCreatingTag(false)
-      setNewTagInput('')
       setColorEditingTag(null)
-      setSelectedColor(TAG_COLOR_PALETTE[0])
     },
   )
 
@@ -114,17 +109,9 @@ export default function ContextMenu(props: ContextMenuProps) {
     if (event.key === 'Escape') props.onClose()
   })
 
-  // 进入输入态后自动聚焦
-  createEffect(
-    () => isCreatingTag(),
-    (creating) => {
-      if (creating) queueMicrotask(() => inputEl?.focus())
-    },
-  )
-
   // 子菜单翻边与高度限制：只在展开时量一次，直接改 class/style。
   createEffect(
-    () => [showSubMenu(), mergedTags().length, isCreatingTag()],
+    () => [showSubMenu(), mergedTags().length],
     () => {
       if (!showSubMenu()) return
       // 让 Solid 先完成子菜单的 DOM 插入
@@ -180,19 +167,6 @@ export default function ContextMenu(props: ContextMenuProps) {
       positionMenuAt(menuEl, x, y)
     },
   )
-
-  const submitNewTag = (event: SubmitEvent) => {
-    event.preventDefault()
-    const item = props.menu().item
-    const trimmed = newTagInput().trim()
-    if (!item || !trimmed) return
-
-    props.onSaveTagColor?.(trimmed, selectedColor())
-    props.onSetTag(item, trimmed)
-    setIsCreatingTag(false)
-    setNewTagInput('')
-    props.onClose()
-  }
 
   return (
     <Show when={props.menu().visible && props.menu().item}>
@@ -303,6 +277,12 @@ export default function ContextMenu(props: ContextMenuProps) {
 
                 <div class="submenu-title">选择分类：</div>
 
+                <Show when={mergedTags().length === 0}>
+                  <div class="submenu-empty">
+                    还没有分类。点顶部标签栏的「+」新建一个。
+                  </div>
+                </Show>
+
                 <For each={mergedTags()}>
                   {(tag) => {
                     const dotColor = () => getTagColor(tag, props.tagColors())
@@ -356,61 +336,8 @@ export default function ContextMenu(props: ContextMenuProps) {
                   }}
                 </For>
 
-                <div class="menu-divider" />
-
-                {/* 新建分类输入框与调色盘 */}
-                <Show
-                  when={isCreatingTag()}
-                  fallback={
-                    <div
-                      class="menu-item new-tag"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        // 进入输入态后子菜单不能再被自动收起
-                        cancelScheduledClose()
-                        setIsCreatingTag(true)
-                      }}
-                    >
-                      <span class="item-glyph">&#xE710;</span>
-                      <span class="item-label">新建分类标签</span>
-                    </div>
-                  }
-                >
-                  <form class="new-tag-form" onSubmit={submitNewTag} onClick={(e) => e.stopPropagation()}>
-                    <div class="new-tag-input-row">
-                      <span
-                        class="selected-color-preview"
-                        style={{ 'background-color': selectedColor() }}
-                        title="当前选择的颜色"
-                      />
-                      <input
-                        ref={inputEl}
-                        class="new-tag-input"
-                        type="text"
-                        placeholder="标签名称..."
-                        value={newTagInput()}
-                        maxlength={12}
-                        onInput={(event) => setNewTagInput(event.currentTarget.value)}
-                      />
-                      <button type="submit" class="new-tag-confirm" title="确认">
-                        &#xE73E;
-                      </button>
-                    </div>
-                    <div class="color-palette-row">
-                      <For each={TAG_COLOR_PALETTE}>
-                        {(color) => (
-                          <button
-                            type="button"
-                            class={["palette-color-btn", { active: selectedColor() === color }]}
-                            style={{ 'background-color': color }}
-                            title={color}
-                            onClick={() => setSelectedColor(color)}
-                          />
-                        )}
-                      </For>
-                    </div>
-                  </form>
-                </Show>
+                {/* 新建分类已搬到顶部标签栏：那里有常驻的「+」入口，
+                    能看到全部现有分类，也不会挡住卡片列表。 */}
               </div>
             </Show>
           </div>
