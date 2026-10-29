@@ -5,6 +5,8 @@ import { hasOcrText } from '../ocr'
 
 interface ClipCardProps {
   item: ClipboardItem
+  /** 当前处于哪个分类视图下（null 表示「全部」） */
+  activeTag?: () => string | null
   /**
    * 缩略图 data URL。`undefined` = 还没拉过，`null` = 拉过但取不到。
    * 两者在视觉上都是占位，但前者会触发一次拉取。
@@ -160,6 +162,11 @@ export default function ClipCard(props: ClipCardProps) {
     }
   }
 
+  /** 置顶过的分类卡片，在非对应分类视图下限制删除 */
+  const isDeleteDisabled = createMemo(() => {
+    return !!(item().pinned && item().tag && props.activeTag?.() !== item().tag)
+  })
+
   return (
     <div class={["card-shell", `cat-${semanticCategory()}`, { selected: props.selected() }]}>
       <div
@@ -204,8 +211,13 @@ export default function ClipCard(props: ClipCardProps) {
               {item().pinned ? '\uE840' : '\uE718'}
             </button>
             <button
-              class="band-btn del"
-              title="删除 (Del)"
+              class={["band-btn", "del", { disabled: isDeleteDisabled() }]}
+              title={
+                isDeleteDisabled()
+                  ? `已在分类「${item().tag}」中置顶，需切换至对应分类后方可删除`
+                  : '删除 (Del)'
+              }
+              aria-disabled={isDeleteDisabled() ? 'true' : 'false'}
               onClick={(event) => {
                 event.stopPropagation()
                 props.onRemove(item())

@@ -333,7 +333,14 @@ export default function App() {
   }
 
   const onTogglePin = (item: ClipboardItem) => send({ type: 'togglePin', itemId: item.id })
-  const onRemove = (item: ClipboardItem) => send({ type: 'delete', itemId: item.id })
+  const onRemove = (item: ClipboardItem) => {
+    // 置顶过的分类卡片，只能在对应分类下删除
+    if (item.pinned && item.tag && activeTag() !== item.tag) {
+      showToast(`该卡片已在分类「${item.tag}」中置顶，需切换至对应分类后方可删除`)
+      return
+    }
+    send({ type: 'delete', itemId: item.id })
+  }
   const onSetTag = (item: ClipboardItem, tag: string | null) =>
     send({ type: 'setTag', itemId: item.id, tag })
 
@@ -415,7 +422,12 @@ export default function App() {
       case 'Delete':
         if (!typing && selected !== null) {
           event.preventDefault()
-          send({ type: 'delete', itemId: selected })
+          const currentItem = items().find((i) => i.id === selected)
+          if (currentItem) {
+            onRemove(currentItem)
+          } else {
+            send({ type: 'delete', itemId: selected })
+          }
         }
         break
       case 'ArrowLeft':
@@ -497,6 +509,7 @@ export default function App() {
         <div class="list-area">
           <CardGrid
             items={items}
+            activeTag={activeTag}
             thumbnails={thumbnails}
             onRequestThumbnail={onRequestThumbnail}
             selectedId={selectedId}
@@ -545,6 +558,7 @@ export default function App() {
         {/* 5. 原生风格右键上下文菜单 */}
         <ContextMenu
           menu={contextMenu}
+          activeTag={activeTag}
           allTags={allTags}
           tagColors={tagColors}
           onClose={onCloseContextMenu}

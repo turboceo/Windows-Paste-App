@@ -51,6 +51,8 @@ interface DragSession {
 
 interface CardGridProps {
   items: () => ClipboardItem[]
+  /** 当前选中的分类标签（null 表示「全部」） */
+  activeTag?: () => string | null
   /** 已拉取的缩略图，key 是条目 id */
   thumbnails: () => Record<number, string | null>
   onRequestThumbnail: (itemId: number) => void
@@ -565,6 +567,7 @@ export default function CardGrid(props: CardGridProps) {
                   >
                     <ClipCard
                       item={item}
+                      activeTag={props.activeTag}
                       thumbnail={() => props.thumbnails()[item.id]}
                       onRequestThumbnail={props.onRequestThumbnail}
                       selected={() => item.id === props.selectedId()}

@@ -13,6 +13,7 @@ export interface ContextMenuState {
 
 interface ContextMenuProps {
   menu: () => ContextMenuState
+  activeTag?: () => string | null
   allTags: () => string[]
   tagColors: () => Record<string, string>
   onClose: () => void
@@ -418,17 +419,30 @@ export default function ContextMenu(props: ContextMenuProps) {
           <div class="menu-divider" />
 
           {/* 5. 删除卡片 */}
-          <div
-            class="menu-item danger"
-            onClick={() => {
-              props.onRemove(item())
-              props.onClose()
-            }}
-          >
-            <span class="item-glyph">&#xE74D;</span>
-            <span class="item-label">删除记录</span>
-            <kbd class="item-shortcut">Del</kbd>
-          </div>
+          {(() => {
+            const isDeleteDisabled = () =>
+              !!(item().pinned && item().tag && props.activeTag?.() !== item().tag)
+            return (
+              <div
+                class={["menu-item", "danger", { disabled: isDeleteDisabled() }]}
+                title={
+                  isDeleteDisabled()
+                    ? `已在分类「${item().tag}」中置顶，需切换至对应分类后方可删除`
+                    : undefined
+                }
+                onClick={() => {
+                  props.onRemove(item())
+                  if (!isDeleteDisabled()) {
+                    props.onClose()
+                  }
+                }}
+              >
+                <span class="item-glyph">&#xE74D;</span>
+                <span class="item-label">删除记录</span>
+                <kbd class="item-shortcut">Del</kbd>
+              </div>
+            )
+          })()}
         </div>
       )}
     </Show>

@@ -341,6 +341,23 @@ pub fn handle(app: &AppHandle, state: &mut AppState, req: HostRequest) {
             });
         }
         HostRequest::Delete { item_id } => {
+            // 置顶过的分类卡片，只能在对应分类下删除
+            if let Some(item) = state.items.iter().find(|i| i.id == item_id) {
+                if item.pinned && item.tag.is_some() && state.active_tag != item.tag {
+                    emit_push(
+                        app,
+                        json!({
+                            "type": "toast",
+                            "message": format!(
+                                "该卡片已在分类「{}」中置顶，需切换至对应分类后方可删除",
+                                item.tag.as_deref().unwrap_or("")
+                            ),
+                        }),
+                    );
+                    return;
+                }
+            }
+
             // 删除前先记下它的槽位，以及它是不是当前选中项。
             // reload() 找不到原选中 id 时会回退到第一项——那会让界面
             // 从用户正看着的位置直接跳回顶部，所以下面要覆盖掉。

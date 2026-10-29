@@ -632,6 +632,17 @@ body.is-dragging-card .card-slot .paste-card {
   background: rgba(139, 20, 20, 0.42);
 }
 
+.band-btn.del.disabled,
+.band-btn.del:disabled {
+  opacity: 0.35 !important;
+  cursor: not-allowed;
+}
+
+.band-btn.del.disabled:hover,
+.band-btn.del:disabled:hover {
+  background: transparent;
+}
+
 .card-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -1266,6 +1277,25 @@ body.is-dragging-card .card-slot .paste-card {
 .menu-item.danger:hover {
   background: #e81123;
   color: #ffffff;
+}
+
+.menu-item.disabled,
+.menu-item.danger.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.menu-item.disabled:hover,
+.menu-item.danger.disabled:hover {
+  background: transparent !important;
+  color: var(--text-main) !important;
+}
+
+.menu-item.disabled:hover .item-glyph,
+.menu-item.disabled:hover .item-shortcut,
+.menu-item.disabled:hover .arrow-glyph,
+.menu-item.danger.disabled:hover .item-glyph {
+  color: var(--text-dim) !important;
 }
 
 .menu-item.danger .item-glyph {
