@@ -14,9 +14,10 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
     DispatchMessageW, GetCursorPos, GetMessageW, LoadIconW, PostQuitMessage, RegisterClassW,
-    SetForegroundWindow, TrackPopupMenu, TranslateMessage, HICON, IDI_APPLICATION,
-    MF_SEPARATOR, MF_STRING, MSG, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RETURNCMD, TPM_RIGHTBUTTON,
-    WM_APP, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_RBUTTONUP, WNDCLASSW,
+    RegisterWindowMessageW, SetForegroundWindow, TrackPopupMenu, TranslateMessage, HICON,
+    IDI_APPLICATION, MF_SEPARATOR, MF_STRING, MSG, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
+    TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_APP, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONUP,
+    WM_RBUTTONUP, WNDCLASSW,
 };
 
 use crate::clipboard::wide_str;
@@ -24,6 +25,9 @@ use crate::clipboard::wide_str;
 const WM_TRAYICON: u32 = WM_APP + 101;
 const ID_TRAY_SHOW: u32 = 1001;
 const ID_TRAY_EXIT: u32 = 1003;
+
+static WM_TASKBAR_CREATED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static CURRENT_TRAY_ICON: Mutex<Option<HICON>> = Mutex::new(None);
 
 type TrayCallback = Arc<dyn Fn() + Send + Sync + 'static>;
 
@@ -94,22 +98,14 @@ impl TrayIcon {
                 return;
             }
 
-            let icon = app_icon;
-            let mut tip = [0u16; 128];
-            let tip_text = wide_str("Windows Paste (Ctrl+Shift+V)");
-            let copy_len = tip_text.len().min(127);
-            tip[..copy_len].copy_from_slice(&tip_text[..copy_len]);
+            // 注册 TaskbarCreated 系统消息，处理 Explorer 重启后托盘图标丢失问题
+            let taskbar_created_msg = RegisterWindowMessageW(wide_str("TaskbarCreated").as_ptr());
+            WM_TASKBAR_CREATED.store(taskbar_created_msg, std::sync::atomic::Ordering::SeqCst);
+            if let Ok(mut l) = CURRENT_TRAY_ICON.lock() {
+                *l = Some(app_icon);
+            }
 
-            let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
-            nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
-            nid.hWnd = hwnd;
-            nid.uID = 1;
-            nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
-            nid.uCallbackMessage = WM_TRAYICON;
-            nid.hIcon = icon;
-            nid.szTip = tip;
-
-            Shell_NotifyIconW(NIM_ADD, &mut nid);
+            add_tray_icon(hwnd, app_icon);
 
             let mut msg: MSG = std::mem::zeroed();
             while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
@@ -117,9 +113,45 @@ impl TrayIcon {
                 DispatchMessageW(&msg);
             }
 
-            Shell_NotifyIconW(NIM_DELETE, &mut nid);
+            remove_tray_icon(hwnd);
             DestroyWindow(hwnd);
         });
+    }
+}
+
+unsafe fn remove_tray_icon(hwnd: HWND) {
+    let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
+    nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+    nid.hWnd = hwnd;
+    nid.uID = 1;
+    let _ = Shell_NotifyIconW(NIM_DELETE, &mut nid);
+}
+
+unsafe fn add_tray_icon(hwnd: HWND, icon: HICON) {
+    let mut tip = [0u16; 128];
+    let tip_text = wide_str("Windows Paste (Ctrl+Shift+V)");
+    let copy_len = tip_text.len().min(127);
+    tip[..copy_len].copy_from_slice(&tip_text[..copy_len]);
+
+    let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
+    nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
+    nid.hWnd = hwnd;
+    nid.uID = 1;
+    nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    nid.uCallbackMessage = WM_TRAYICON;
+    nid.hIcon = icon;
+    nid.szTip = tip;
+
+    // 先删除已有的（防御性清理，避免重复添加导致图标残影），再添加
+    let _ = Shell_NotifyIconW(NIM_DELETE, &mut nid);
+    let ok = Shell_NotifyIconW(NIM_ADD, &mut nid);
+    if ok == 0 {
+        crate::logging::log("[托盘] Shell_NotifyIconW(NIM_ADD) 返回失败，1秒后重试");
+        thread::sleep(std::time::Duration::from_millis(1000));
+        let retry_ok = Shell_NotifyIconW(NIM_ADD, &mut nid);
+        crate::logging::log(&format!("[托盘] 托盘图标添加重试结果: {retry_ok}"));
+    } else {
+        crate::logging::log("[托盘] 托盘图标注册成功");
     }
 }
 
@@ -321,6 +353,17 @@ unsafe extern "system" fn tray_wnd_proc(
             PostQuitMessage(0);
             0
         }
-        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+        _ => {
+            let taskbar_created = WM_TASKBAR_CREATED.load(std::sync::atomic::Ordering::Relaxed);
+            if taskbar_created != 0 && msg == taskbar_created {
+                crate::logging::log("[托盘] 收到 TaskbarCreated 消息，重新添加托盘图标");
+                let icon = CURRENT_TRAY_ICON.lock().ok().and_then(|g| *g).unwrap_or(std::ptr::null_mut());
+                if !icon.is_null() {
+                    add_tray_icon(hwnd, icon);
+                }
+                return 0;
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
     }
 }
